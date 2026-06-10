@@ -43,60 +43,71 @@ class GA:
             seq[i] = 4.0 * seq[i - 1] * (1.0 - seq[i - 1])
         return seq
     
+    def _greedy_ms(self, job_id, op_id):
+        """贪婪 MS 选择：选择加工时间最短的机器"""
+        op_data = self.jobs[job_id][op_id]
+        times = op_data["times"]
+        min_time = min(times)
+        # 如果有多个相同最小时长，随机选一个
+        candidates = [i for i, t in enumerate(times) if t == min_time]
+        return random.choice(candidates)
+
     def initialize_population(self):
-        """初始化种群：使用 Logistic 混沌映射生成 OS 和 MS 编码"""
+        """初始化种群：混合策略——部分贪心+部分混沌"""
         population = []
-        for _ in range(self.pop_size):
-            # 1. OS 编码: 使用混沌序列辅助生成工序排列
+        # 策略分配：30%纯贪心, 30%纯混沌, 40%混沌OS+贪心MS
+        for i in range(self.pop_size):
+            # OS 编码: 混沌排列
             os_base = []
             for job_id, num_ops in enumerate(self.ops_per_job):
                 os_base.extend([job_id] * num_ops)
-            # 用混沌序列对 OS 进行排列（替代 random.shuffle）
             chaotic_os = self._chaotic_sequence(len(os_base), x0=random.random() * 0.8 + 0.1)
             os = [x for _, x in sorted(zip(chaotic_os, os_base), key=lambda pair: pair[0])]
-            
-            # 2. MS 编码: 使用混沌序列选择机器
+
             ms = []
-            chaotic_ms = self._chaotic_sequence(self.total_ops, x0=random.random() * 0.8 + 0.1)
-            idx = 0
-            for job_id, job in enumerate(self.jobs):
-                for op_id, op in enumerate(job):
-                    # 混沌值映射到机器索引 [0, num_machines)
-                    choice = int(chaotic_ms[idx] * len(op["machines"])) % len(op["machines"])
-                    ms.append(choice)
-                    idx += 1
-            
+            if i < self.pop_size * 0.3:
+                # 策略1: 纯贪心 MS（全部选最短加工时间）
+                for job_id, job in enumerate(self.jobs):
+                    for op_id in range(len(job)):
+                        ms.append(self._greedy_ms(job_id, op_id))
+            elif i < self.pop_size * 0.6:
+                # 策略2: 纯混沌 MS
+                chaotic_ms = self._chaotic_sequence(self.total_ops, x0=random.random() * 0.8 + 0.1)
+                idx = 0
+                for job_id, job in enumerate(self.jobs):
+                    for op in job:
+                        choice = int(chaotic_ms[idx] * len(op["machines"])) % len(op["machines"])
+                        ms.append(choice)
+                        idx += 1
+            else:
+                # 策略3: 混合——70%概率贪心, 30%概率随机
+                for job_id, job in enumerate(self.jobs):
+                    for op_id in range(len(job)):
+                        if random.random() < 0.7:
+                            ms.append(self._greedy_ms(job_id, op_id))
+                        else:
+                            op = job[op_id]
+                            ms.append(random.randint(0, len(op["machines"]) - 1))
+
             population.append({"os": os, "ms": ms, "fitness": None, "cmax": None, "load_var": None})
         return population
     
     def decode(self, individual):
         """
-        解码：将 OS 和 MS 转换为 assignment 列表，同时得到每道工序实际使用的机器和加工时间
+        解码：将 OS 和 MS 转换为 assignment 列表
         返回: assignment = [(job_id, op_id, machine_id, duration), ...]
+        注意：decode 是确定性操作，无随机性，保证每次结果一致
         """
-        # 统计每个工件已经处理到的工序索引
         op_idx = [0] * self.num_jobs
         assignment = []
-        # 对于 OS 中的每个工件 id
         for job_id in individual["os"]:
-            # 当前工序索引
             current_op = op_idx[job_id]
-            # 获取该工件该工序的可选机器和加工时间
             op_data = self.jobs[job_id][current_op]
-            # 从 MS 中取出对应的机器选择（需要知道该工序在全局中的索引）
-            # 为简化，我们预先构建一个全局索引映射：每个工件工序对应全局序号
-            # 更好的方法：在解码时动态维护每个工件当前工序的全局索引
-            # 这里先实现一个辅助函数 get_ms_index(job_id, op_id) 
             ms_index = self._get_ms_index(job_id, current_op)
             machine_choice = individual["ms"][ms_index]
-            
-            # 边界检查：确保机器选择索引在合法范围内
-            num_available_machines = len(op_data["machines"])
-            if machine_choice >= num_available_machines or machine_choice < 0:
-                # 使用取模运算修正非法索引
-                machine_choice = machine_choice % num_available_machines
-            
-            # 实际机器ID和加工时间
+            # 确定性修正：取模确保在合法范围
+            num_available = len(op_data["machines"])
+            machine_choice = machine_choice % num_available
             machine_id = op_data["machines"][machine_choice]
             duration = op_data["times"][machine_choice]
             assignment.append((job_id, current_op, machine_id, duration))
@@ -115,55 +126,42 @@ class GA:
         return self._ms_start_idx[job_id] + op_id
     
     def evaluate_fitness(self, individual):
-        """评估个体适应度（Cmax 和 load_var），并存储到个体中"""
         assignment = self.decode(individual)
-        # 使用调度器的 evaluate，需要传入 jobs 的适当格式
-        # 注意：jobs 中的每个操作包含 machines 和 times，需要与 scheduler 中期望一致
-        # 我们已经在 instance_parser 中规范为 {"machines":..., "times":...}
         cmax, load_var = evaluate(self.jobs, assignment, self.num_machines, return_details=False)
         individual["cmax"] = cmax
         individual["load_var"] = load_var
-        # 适应度定义：Cmax 越小越好，负荷方差也越小越好，这里采用加权和或帕累托？
-        # 由于双目标，我们采用简单的加权：fitness = cmax + w * load_var
-        # 或者更常见的：主目标 Cmax，次目标负荷方差。为了选择，我们使用 Cmax 为主，当 Cmax 相同时比较负荷方差
-        # 这里返回 Cmax 和 load_var 分别存储，比较时使用元组 (cmax, load_var)
-        individual["fitness"] = (cmax, load_var)
+        # 适应度使用加权和：主目标 Cmax，辅以负荷方差（归一化权重0.1）
+        # 这样在锦标赛选择时能同时考虑两个目标，避免只盯着Cmax导致负荷失衡
+        individual["fitness"] = cmax + 0.1 * load_var
         return cmax, load_var
     
     def selection_tournament(self, population):
-        """锦标赛选择，返回选中的个体"""
         selected = random.sample(population, self.tournament_size)
         # 按适应度排序（Cmax 升序，然后 load_var 升序）
-        selected.sort(key=lambda ind: (ind["cmax"], ind["load_var"]))
+        selected.sort(key=lambda ind: ind["fitness"])
         return selected[0]
     
     def crossover(self, parent1, parent2, pc):
         """交叉操作：对 OS 和 MS 分别交叉，返回两个子代"""
         if random.random() > pc:
-            # 不交叉，直接复制
             return parent1.copy(), parent2.copy()
         
-        # 1. OS 交叉: 使用 POX (precedence operation crossover)
-        # 随机划分工件集合为两个子集
+        # OS 交叉: POX (precedence operation crossover)
         jobs_set = list(range(self.num_jobs))
-        # 边界保护：当工件数为1时无法划分子集，直接复制
         if self.num_jobs <= 1:
             child1_os = parent1["os"][:]
             child2_os = parent2["os"][:]
         else:
             subset1 = set(random.sample(jobs_set, k=random.randint(1, self.num_jobs-1)))
             subset2 = set(jobs_set) - subset1
-            
             child1_os = []
             child2_os = []
-            # 子代1: 保留父代1中属于subset1的工件顺序，保留父代2中属于subset2的工件顺序
             for gene in parent1["os"]:
                 if gene in subset1:
                     child1_os.append(gene)
             for gene in parent2["os"]:
                 if gene in subset2:
                     child1_os.append(gene)
-            # 子代2: 保留父代2中属于subset1，父代1中属于subset2
             for gene in parent2["os"]:
                 if gene in subset1:
                     child2_os.append(gene)
@@ -191,19 +189,18 @@ class GA:
         child2 = {"os": child2_os, "ms": child2_ms}
         return child1, child2
     
-    def mutate(self, individual, pm):
-        """变异操作：对 OS 和 MS 分别变异"""
-        # OS 变异: 交换两个不同的基因
-        # 边界保护：至少需要2个基因才能交换
-        if random.random() < pm and len(individual["os"]) >= 2:
-            idx1, idx2 = random.sample(range(len(individual["os"])), 2)
-            individual["os"][idx1], individual["os"][idx2] = individual["os"][idx2], individual["os"][idx1]
-        
-        # MS 变异: 每个位置以 pm 概率重新选择机器
+    def mutate(self, individual, pm, gen_progress=0.0):
+        """变异操作：OS 交换 + MS 随机重选"""
+        os_len = len(individual["os"])
+        if os_len >= 2 and random.random() < pm:
+            num_swaps = random.randint(1, max(1, os_len // 10))
+            for _ in range(num_swaps):
+                idx1, idx2 = random.sample(range(os_len), 2)
+                individual["os"][idx1], individual["os"][idx2] = individual["os"][idx2], individual["os"][idx1]
+        # MS 变异率略高于 pm，维持探索能力
+        ms_pm = min(pm * 1.5, 0.5)
         for i in range(len(individual["ms"])):
-            if random.random() < pm:
-                # 找出该位置对应的工件和工序
-                # 需要从全局索引反推 (job_id, op_id)
+            if random.random() < ms_pm:
                 job_id, op_id = self._get_job_op_from_ms_index(i)
                 op_data = self.jobs[job_id][op_id]
                 new_choice = random.randint(0, len(op_data["machines"]) - 1)
@@ -223,52 +220,91 @@ class GA:
                 op_id = ms_idx - start
                 return job_id, op_id
         raise IndexError("Invalid ms index")
-    
-    def evolve(self, pc, pm):
+
+    def _compute_diversity(self):
+        """计算种群多样性（OS海明距离采样）"""
+        if len(self.population) < 2:
+            return 0.0
+        sample_size = min(30, len(self.population))
+        sample_indices = random.sample(range(len(self.population)), sample_size)
+        total_hamming = 0
+        count = 0
+        chrom_len = max(len(self.population[0]["os"]), 1)
+        for i in range(len(sample_indices)):
+            for j in range(i + 1, len(sample_indices)):
+                os_i = self.population[sample_indices[i]]["os"]
+                os_j = self.population[sample_indices[j]]["os"]
+                hamming = sum(1 for a, b in zip(os_i, os_j) if a != b)
+                total_hamming += hamming
+                count += 1
+        avg_hamming = total_hamming / max(count, 1)
+        return avg_hamming / chrom_len
+
+    def _restart_population(self, keep_best=True):
+        """重启种群：保留最优个体，其余重新初始化"""
+        if keep_best:
+            best = min(self.population, key=lambda ind: ind["fitness"])
+            new_pop = [{
+                "os": best["os"][:],
+                "ms": best["ms"][:],
+                "cmax": best["cmax"],
+                "load_var": best["load_var"],
+                "fitness": best["fitness"]
+            }]
+            rest = self.initialize_population()
+            new_pop.extend(rest[:self.pop_size - 1])
+        else:
+            new_pop = self.initialize_population()
+            best = None
+        for ind in new_pop:
+            if ind["fitness"] is None:
+                self.evaluate_fitness(ind)
+        self.population = new_pop
+        if self.verbose and best is not None:
+            print(f"  [重启] 种群已重启，保留最优 Cmax={best['cmax']}")
+
+    def evolve(self, pc, pm, gen_progress=0.0):
         """执行一代进化，返回新一代种群"""
-        # 选择、交叉、变异生成新种群
         new_pop = []
-        # 保留精英（稍后加入，避免丢失最优）
-        # 先按适应度排序
-        sorted_pop = sorted(self.population, key=lambda ind: (ind["cmax"], ind["load_var"]))
+        sorted_pop = sorted(self.population, key=lambda ind: ind["fitness"])
         elites = sorted_pop[:self.elite_count]
-        
-        # 生成其余个体
+
         while len(new_pop) < self.pop_size - self.elite_count:
             parent1 = self.selection_tournament(self.population)
             parent2 = self.selection_tournament(self.population)
             child1, child2 = self.crossover(parent1, parent2, pc)
-            child1 = self.mutate(child1, pm)
-            child2 = self.mutate(child2, pm)
-            # 评估新个体
+            child1 = self.mutate(child1, pm, gen_progress)
+            child2 = self.mutate(child2, pm, gen_progress)
             self.evaluate_fitness(child1)
             self.evaluate_fitness(child2)
             new_pop.append(child1)
             new_pop.append(child2)
-        # 截断至所需数量
         new_pop = new_pop[:self.pop_size - self.elite_count]
         
-        # 加入精英（需要深拷贝避免引用）
-        # 关键安全检查：确保OS和MS编码长度一致
-        for e in elites:
+        # 精英保留策略：用精英个体替换新种群中最差的个体（保持种群规模不变）
+        # 先将新种群按适应度排序（最差在最后）
+        new_pop.sort(key=lambda ind: ind["fitness"])
+        # 从末尾开始替换最差的个体
+        replace_count = min(self.elite_count, len(new_pop))
+        for i in range(replace_count):
+            e = elites[i]
             os_len = len(e["os"])
             ms_len = len(e["ms"])
-            if os_len != ms_len:
-                # 如果检测到长度不匹配，发出警告并跳过该精英个体
-                print(f"  [警告] 精英个体编码长度不一致: OS={os_len}, MS={ms_len}，跳过该个体")
+            # 安全检查：确保编码长度一致
+            if os_len != ms_len or os_len == 0:
                 continue
-            
-            new_pop.append({
+            # 用精英替换新种群中最差的那个
+            new_pop[-(i+1)] = {
                 "os": e["os"][:], 
                 "ms": e["ms"][:], 
                 "cmax": e["cmax"], 
                 "load_var": e["load_var"], 
                 "fitness": e["fitness"]
-            })
+            }
         
         self.population = new_pop
         # 返回最优个体
-        best = min(self.population, key=lambda ind: (ind["cmax"], ind["load_var"]))
+        best = min(self.population, key=lambda ind: ind["fitness"])
         return best
     
     def run(self, rl_controller=None, alns=None):
@@ -283,42 +319,42 @@ class GA:
         for ind in self.population:
             self.evaluate_fitness(ind)
         
-        best_individual = None
-        best_cmax = float('inf')
-        
+        best_individual = min(self.population, key=lambda ind: ind["fitness"])
+        best_cmax = best_individual["cmax"]
+        no_improve_gen = 0
+        restart_interval = 80
+
         for gen in range(self.max_gen):
-            # 计算当前代状态与指标，用于 RL 奖励更新
+            gen_progress = gen / max(self.max_gen, 1)
             if rl_controller is not None:
                 old_best_cmax = min(ind["cmax"] for ind in self.population)
                 old_avg_cmax = np.mean([ind["cmax"] for ind in self.population])
                 state = rl_controller.compute_state(self.population)
                 action_idx = rl_controller.select_action(state)
-                # 根据动作调整 pc, pm
                 pc, pm = rl_controller.adjust_probabilities(rl_controller.current_pc, rl_controller.current_pm, action_idx)
             else:
-                pc = self.pc_high  # 默认使用上限
+                pc = self.pc_high
                 pm = self.pm_low
-            
-            # 进化一代
-            current_best = self.evolve(pc, pm)
+
+            self.evolve(pc, pm, gen_progress)
+
+            current_best = min(self.population, key=lambda ind: ind["fitness"])
             if current_best["cmax"] < best_cmax:
                 best_cmax = current_best["cmax"]
                 best_individual = current_best
-            
-            # 可选：对精英执行 ALNS
-            if alns is not None:
-                # 提取当前种群最优的 elite_count 个个体
-                sorted_pop = sorted(self.population, key=lambda ind: (ind["cmax"], ind["load_var"]))
+                no_improve_gen = 0
+            else:
+                no_improve_gen += 1
+
+            # ALNS 每10代执行一次
+            if alns is not None and (gen + 1) % 10 == 0:
+                sorted_pop = sorted(self.population, key=lambda ind: ind["fitness"])
                 elites = sorted_pop[:self.elite_count]
                 non_elites = sorted_pop[self.elite_count:]
-                
-                # 对精英个体执行 ALNS 局部深搜
                 for i in range(len(elites)):
                     improved = alns.optimize(elites[i], self)
                     if improved["cmax"] < elites[i]["cmax"]:
                         elites[i] = improved
-                
-                # 精英替换策略：ALNS优化后的精英替换种群中最差的个体
                 self.population = elites + non_elites
 
             if rl_controller is not None:
@@ -327,9 +363,17 @@ class GA:
                 reward = rl_controller.compute_reward(old_best_cmax, new_best_cmax, old_avg_cmax, new_avg_cmax)
                 next_state = rl_controller.compute_state(self.population)
                 rl_controller.update_q_table(reward, next_state)
-            
-            if self.verbose and (gen+1) % 10 == 0:
+
+            # 多样性监控 + 重启
+            if no_improve_gen > 0 and no_improve_gen % restart_interval == 0:
+                diversity = self._compute_diversity()
+                if diversity < 0.15:
+                    self._restart_population(keep_best=True)
+                    no_improve_gen = 0
+
+            if self.verbose and (gen + 1) % 10 == 0:
                 avg_cmax = np.mean([ind["cmax"] for ind in self.population])
-                print(f"Gen {gen+1}: best cmax={best_cmax}, avg cmax={avg_cmax:.2f}")
-        
+                diversity = self._compute_diversity()
+                print(f"Gen {gen+1}: best cmax={best_cmax}, avg cmax={avg_cmax:.2f}, diversity={diversity:.3f}")
+
         return best_individual

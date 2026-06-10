@@ -17,18 +17,18 @@ INSTANCE_PATH = os.path.join(DATA_ROOT, DEFAULT_INSTANCE)
 # ========== 2. 滚动时域与扰动参数 ==========
 # 设备退化系数（温和退化，每次加工后耗时 *= 1.02，配合上限1.5倍）
 # 如需禁用退化用于教学演示或原型验证，设为 1.0
-DEGRADATION_COEFF = 1.02          
+DEGRADATION_COEFF = 1.0           # 设为1.0禁用退化（在GA基线验证后如需退化可改回1.02）
 TIME_FLUCTUATION = 0.10           # 加工时间随机波动 ±10%（正态分布）
 TRIGGER_TYPE = "event_driven"     # 重调度触发方式：event_driven / periodic
 PERIODIC_INTERVAL = 100            # 周期驱动的时间间隔（若采用）
 
 # ========== 3. 遗传算法参数 ==========
-POP_SIZE = 100                     # 种群规模
-MAX_GEN = 100                      # 最大迭代次数（复杂算例如MK10可设为200）
-PC_BOUND = [0.6, 0.9]             # 交叉概率动态调整边界 [min, max]
-PM_BOUND = [0.01, 0.1]            # 变异概率动态调整边界 [min, max]
+POP_SIZE = 200                     # 种群规模（原来150，增大多样性）
+MAX_GEN = 300                      # 最大迭代次数（原来200）
+PC_BOUND = [0.8, 0.95]            # 交叉概率动态调整边界（提高最低交叉率）
+PM_BOUND = [0.08, 0.20]           # 变异概率动态调整边界（提高最低变异率防止早熟）
 TOURNAMENT_SIZE = 3                # 锦标赛选择规模
-ELITE_RATIO = 0.1                  # 精英保留比例（送往ALNS的比例）
+ELITE_RATIO = 0.05                 # 精英保留比例（减少到5%，避免精英过快主导）
 ELITE_COUNT = int(POP_SIZE * ELITE_RATIO)  # 精英数量（10）
 
 # ========== 4. 强化学习参数（Q-learning） ==========
@@ -50,14 +50,14 @@ ACTION_SPACE = [(+0.05, -0.05), (0, 0), (-0.05, +0.05)]
 STATE_SIZE = 9                     # 3x3 组合
 
 # ========== 5. 自适应大邻域搜索参数 ==========
-RHO = 0.5                          # 算子权重衰减系数（历史得分占比）
+RHO = 0.3                          # 算子权重衰减系数（原来0.5，加快权重自适应速度）
 REWARD_GLOBAL_BEST = 10            # 找到全局最优解的奖励
 REWARD_BETTER = 5                  # 找到比当前解更好的解的奖励
-REWARD_ACCEPT = 2                  # 接受劣质解（退火接受）的奖励
+REWARD_ACCEPT = 1                  # 接受劣质解的奖励（原来2，降低劣质解权重）
 DESTROY_SIZE_MIN = 2               # 破坏工序数最小值
-DESTROY_SIZE_MAX = 5               # 破坏工序数最大值
-T0 = 100                           # 模拟退火初始温度
-SA_ALPHA = 0.95                    # 退火速率
+DESTROY_SIZE_MAX = 6               # 破坏工序数最大值（原来5，扩大搜索范围）
+T0 = 50                            # 模拟退火初始温度（原来100）
+SA_ALPHA = 0.92                    # 退火速率（原来0.95，降温更快减少劣质接受）
 
 # ========== 6. 随机性与日志 ==========
 RANDOM_SEED = 42                   # 随机种子

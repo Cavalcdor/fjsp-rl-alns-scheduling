@@ -40,9 +40,9 @@ def load_fjsp_from_file(filepath):
     first_line = lines[idx].strip()
     idx += 1
     
-    parts = list(map(int, first_line.split()))
-    num_jobs = parts[0]
-    num_machines = parts[1]
+    parts = list(map(float, first_line.split()))
+    num_jobs = int(parts[0])
+    num_machines = int(parts[1])
     # 第三个数字（平均可选机器数）可忽略
     
     jobs = []
@@ -57,9 +57,12 @@ def load_fjsp_from_file(filepath):
         data_line = lines[idx].strip()
         idx += 1
         
-        data = list(map(int, data_line.split()))
+
+
+
+        data = list(map(float, data_line.split()))
         
-        num_ops = data[0]
+        num_ops = int(data[0])
         job_operations = []
         pos = 1
         
@@ -70,7 +73,8 @@ def load_fjsp_from_file(filepath):
                 idx += 1
                 data.extend(map(int, next_line.split()))
             
-            k = data[pos]
+
+            k = int(data[pos])
             pos += 1
             
             if pos + 2*k > len(data):
@@ -80,9 +84,12 @@ def load_fjsp_from_file(filepath):
             
             machines = []
             times = []
+
+
+
             for _ in range(k):
-                machine_id = data[pos]
-                proc_time = data[pos+1]
+                machine_id = int(data[pos])
+                proc_time = float(data[pos+1])
                 pos += 2
                 machines.append(machine_id)
                 times.append(proc_time)

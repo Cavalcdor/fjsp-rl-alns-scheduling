@@ -76,11 +76,9 @@ class ALNS:
             machine_choice = individual["ms"][ms_index]
             op_data = self.jobs[job_id][current_op]
             
-            # 边界检查：确保机器选择索引在合法范围内
+            # 确定性修正：取模确保在合法范围
             num_available_machines = len(op_data["machines"])
-            if machine_choice >= num_available_machines or machine_choice < 0:
-                # 使用取模运算修正非法索引
-                machine_choice = machine_choice % num_available_machines
+            machine_choice = machine_choice % num_available_machines
             
             machine_id = op_data["machines"][machine_choice]
             duration = op_data["times"][machine_choice]
@@ -145,7 +143,7 @@ class ALNS:
         cmax, load_var = evaluate(self.jobs, assignment, self.num_machines, return_details=False)
         individual["cmax"] = cmax
         individual["load_var"] = load_var
-        individual["fitness"] = (cmax, load_var)
+        individual["fitness"] = cmax + 0.1 * load_var
         return cmax, load_var
     
     def destroy_random(self, individual, destroy_size):
