@@ -327,7 +327,23 @@ class ALNS:
         os_list = individual["os"][:]
         removed = []
         
+        # 关键修复：在访问前验证索引有效性
+        valid_selected = []
         for idx in selected:
+            if 0 <= idx < len(os_list):
+                valid_selected.append(idx)
+            else:
+                # 如果索引无效，跳过（理论上不应该发生，但作为安全防护）
+                continue
+        
+        # 如果没有有效索引，返回原个体
+        if not valid_selected:
+            return individual, []
+        
+        # 按降序处理有效索引
+        valid_selected.sort(reverse=True)
+        
+        for idx in valid_selected:
             job_id = os_list[idx]
             op_id = os_list[:idx].count(job_id)
             ms_idx = self._get_ms_index(job_id, op_id)
