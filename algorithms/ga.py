@@ -89,6 +89,13 @@ class GA:
             # 这里先实现一个辅助函数 get_ms_index(job_id, op_id) 
             ms_index = self._get_ms_index(job_id, current_op)
             machine_choice = individual["ms"][ms_index]
+            
+            # 边界检查：确保机器选择索引在合法范围内
+            num_available_machines = len(op_data["machines"])
+            if machine_choice >= num_available_machines or machine_choice < 0:
+                # 使用取模运算修正非法索引
+                machine_choice = machine_choice % num_available_machines
+            
             # 实际机器ID和加工时间
             machine_id = op_data["machines"][machine_choice]
             duration = op_data["times"][machine_choice]
@@ -225,9 +232,25 @@ class GA:
             new_pop.append(child2)
         # 截断至所需数量
         new_pop = new_pop[:self.pop_size - self.elite_count]
+        
         # 加入精英（需要深拷贝避免引用）
+        # 关键安全检查：确保OS和MS编码长度一致
         for e in elites:
-            new_pop.append({"os": e["os"][:], "ms": e["ms"][:], "cmax": e["cmax"], "load_var": e["load_var"], "fitness": e["fitness"]})
+            os_len = len(e["os"])
+            ms_len = len(e["ms"])
+            if os_len != ms_len:
+                # 如果检测到长度不匹配，发出警告并跳过该精英个体
+                print(f"  [警告] 精英个体编码长度不一致: OS={os_len}, MS={ms_len}，跳过该个体")
+                continue
+            
+            new_pop.append({
+                "os": e["os"][:], 
+                "ms": e["ms"][:], 
+                "cmax": e["cmax"], 
+                "load_var": e["load_var"], 
+                "fitness": e["fitness"]
+            })
+        
         self.population = new_pop
         # 返回最优个体
         best = min(self.population, key=lambda ind: (ind["cmax"], ind["load_var"]))

@@ -81,6 +81,18 @@ fjsp-rl-alns-scheduling/
 pip install numpy matplotlib
 ```
 
+### Git配置（首次使用）
+
+如果项目中存在已跟踪的`.pyc`文件或`__pycache__`目录，需要先清理：
+
+```bash
+# 从Git索引中移除已跟踪的Python编译文件
+git rm -r --cached **/__pycache__/
+git commit -m "Remove tracked pycache files"
+```
+
+此后`.gitignore`规则将生效，自动忽略新生成的编译文件。
+
 ### 运行程序
 
 ```bash

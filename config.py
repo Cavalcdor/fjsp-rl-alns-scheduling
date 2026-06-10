@@ -15,7 +15,9 @@ DEFAULT_INSTANCE = "Mk01.fjs"
 INSTANCE_PATH = os.path.join(DATA_ROOT, DEFAULT_INSTANCE)
 
 # ========== 2. 滚动时域与扰动参数 ==========
-DEGRADATION_COEFF = 1.05          # 设备退化系数（每次加工后耗时 *= 1.05）
+# 设备退化系数（温和退化，每次加工后耗时 *= 1.02，配合上限1.5倍）
+# 如需禁用退化用于教学演示或原型验证，设为 1.0
+DEGRADATION_COEFF = 1.02          
 TIME_FLUCTUATION = 0.10           # 加工时间随机波动 ±10%（正态分布）
 TRIGGER_TYPE = "event_driven"     # 重调度触发方式：event_driven / periodic
 PERIODIC_INTERVAL = 100            # 周期驱动的时间间隔（若采用）

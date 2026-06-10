@@ -76,13 +76,20 @@ class RollingHorizon:
     
     def get_actual_processing_time(self, base_time, machine_id):
         """考虑退化系数和随机波动后的实际加工时间"""
-        # 退化系数：每次加工后乘以退化系数，但退化是累积的。假设第k次加工耗时 = base * (deg_coeff)^(k-1)
-        # 这里 machine_process_count 是已经完成的次数，本次是第 count+1 次
+        # 采用温和退化策略，避免指数级增长导致迭代失控
+        # 参考记忆规范：使用局部窗口累积或设置退化上限
+        
+        # 方案：限制最大退化倍数，防止数值爆炸
         k = self.machine_process_count[machine_id] + 1
-        degraded = base_time * (self.degradation_coeff ** (k-1))
+        max_degradation_factor = 1.5  # 最多退化到1.5倍
+        actual_degradation = min(self.degradation_coeff ** (k-1), max_degradation_factor)
+        
+        degraded = base_time * actual_degradation
+        
         # 随机波动：正态分布，均值为1，标准差为 time_fluctuation
         fluctuation = np.random.normal(1.0, self.time_fluctuation)
         actual = degraded * fluctuation
+        
         return max(0.1, actual)  # 避免负时间
     
     def check_trigger(self, event_type=None, current_time=None):
@@ -192,17 +199,28 @@ class RollingHorizon:
         if all(len(job) == 0 for job in remaining):
             return []
         
-        # 重新初始化 GA 实例（基于剩余子问题）
-        # 注意：需要将剩余工件重新编号，但为了简化，我们保持原 job_id，只考虑未完成工序
-        # 我们将剩余工序重新打包成一个新的 jobs 结构（保持原 job_id 但只包含剩余工序）
-        # GA 需要完整的工件列表（仅剩余工序），但注意机器和工件索引不变，可以直接使用剩余 jobs
+        # 关键修复：每次重调度必须完全重新初始化 GA 和 ALNS 实例
+        # 确保其 jobs、ops_per_job、total_ops 等配置与当前剩余子问题完全同步
+        # 这是项目规范的核心要求（记忆 ID: 2537c19a-38ef-423a-9484-4a7524c72612）
         from algorithms.ga import GA
+        from algorithms.alns import ALNS
+        
+        # 基于当前剩余子问题创建新的 GA 实例
         sub_ga = GA(remaining, self.num_machines, self.config)
+        
+        # 基于当前剩余子问题创建新的 ALNS 实例（如果启用）
+        sub_alns = None
+        if self.alns is not None:
+            sub_alns = ALNS(remaining, self.num_machines, self.config)
+            print(f"  [ALNS重新初始化] 剩余工序数: {sub_alns.total_ops}, "
+                  f"工件数: {len(remaining)}")
+        
+        # RL 状态重置（如果需要）
         if self.rl:
-            # 重置 RL 状态
             self.rl.reset_episode()
-        # 运行优化（可传 rl 和 alns）
-        best = sub_ga.run(rl_controller=self.rl, alns=self.alns)
+        
+        # 运行优化（传入新创建的子问题实例）
+        best = sub_ga.run(rl_controller=self.rl, alns=sub_alns)
         # 解码得到 assignment
         assignment = sub_ga.decode(best)
         return assignment

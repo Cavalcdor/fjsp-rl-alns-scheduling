@@ -60,7 +60,7 @@ class ALNS:
         self.global_best_cmax = float('inf')
     
     def decode(self, individual):
-        """解码个体为 assignment (同 GA 中的 decode)"""
+        """将个体解码为调度方案"""
         op_idx = [0] * self.num_jobs
         assignment = []
         # 预先计算 MS 索引映射
@@ -75,6 +75,13 @@ class ALNS:
             ms_index = ms_start_idx[job_id] + current_op
             machine_choice = individual["ms"][ms_index]
             op_data = self.jobs[job_id][current_op]
+            
+            # 边界检查：确保机器选择索引在合法范围内
+            num_available_machines = len(op_data["machines"])
+            if machine_choice >= num_available_machines or machine_choice < 0:
+                # 使用取模运算修正非法索引
+                machine_choice = machine_choice % num_available_machines
+            
             machine_id = op_data["machines"][machine_choice]
             duration = op_data["times"][machine_choice]
             assignment.append((job_id, current_op, machine_id, duration))
@@ -146,12 +153,24 @@ class ALNS:
         new_individual = copy.deepcopy(individual)
         removed = []
         total_ops = len(new_individual["os"])
-        indices = random.sample(range(total_ops), destroy_size)
+        
+        # 安全检查：确保破坏规模不超过可用工序数
+        actual_destroy_size = min(destroy_size, total_ops)
+        if actual_destroy_size < destroy_size:
+            print(f"  [ALNS警告] 请求破坏{destroy_size}个工序，但仅剩{total_ops}个，调整为{actual_destroy_size}")
+        
+        indices = random.sample(range(total_ops), actual_destroy_size)
         indices.sort(reverse=True)
         for idx in indices:
             job_id = new_individual["os"][idx]
             current_op = new_individual["os"][:idx].count(job_id)
             ms_idx = self._get_ms_index(job_id, current_op)
+            
+            # 边界检查：确保MS索引有效
+            if ms_idx >= len(individual["ms"]):
+                print(f"  [ALNS警告] MS索引越界: {ms_idx} >= {len(individual['ms'])}，跳过该工序")
+                continue
+            
             removed.append({
                 "pos": idx,
                 "job_id": job_id,
@@ -160,6 +179,7 @@ class ALNS:
                 "ms_choice": new_individual["ms"][ms_idx]
             })
             del new_individual["os"][idx]
+        
         # 根据剩余 OS 重建 MS（避免索引错位）
         new_individual["ms"] = self._rebuild_ms(new_individual["os"], individual["ms"])
         return new_individual, removed

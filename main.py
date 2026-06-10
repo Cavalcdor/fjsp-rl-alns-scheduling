@@ -58,8 +58,8 @@ def main():
     mode = "rolling_horizon"  # 可选 "static_ga" 或 "rolling_horizon"
     
     if mode == "static_ga":
-        # 静态模式：直接用 GA 求解整个问题（不引入扰动）
-        print("\n=== 静态 GA 模式 ===")
+        # 静态模式：不使用滚动时域机制，但仍使用GA+RL+ALNS混合优化求解整个问题
+        print("\n=== 静态 GA+RL+ALNS 混合优化模式 ===")
         best = ga.run(rl_controller=rl, alns=alns)
         print(f"\n最优解 Cmax: {best['cmax']:.2f}")
         print(f"设备负荷方差: {best['load_var']:.2f}")
