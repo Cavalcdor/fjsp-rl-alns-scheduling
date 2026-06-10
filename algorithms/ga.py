@@ -31,23 +31,40 @@ class GA:
         random.seed(config.RANDOM_SEED)
         np.random.seed(config.RANDOM_SEED)
     
+    def _chaotic_sequence(self, length, x0=0.7):
+        """
+        生成 Logistic 混沌映射序列
+        公式: x_{t+1} = 4 * x_t * (1 - x_t)
+        用于种群初始化，比纯随机具有更好的遍历性和多样性
+        """
+        seq = np.zeros(length)
+        seq[0] = x0  # 初始值（避免 0, 0.25, 0.5, 0.75, 1.0 等不动点）
+        for i in range(1, length):
+            seq[i] = 4.0 * seq[i - 1] * (1.0 - seq[i - 1])
+        return seq
+    
     def initialize_population(self):
-        """初始化种群：随机生成 OS 和 MS 编码"""
+        """初始化种群：使用 Logistic 混沌映射生成 OS 和 MS 编码"""
         population = []
         for _ in range(self.pop_size):
-            # 1. OS 编码: 基于工序的重复序列，例如 [0,1,0,2,1,...] 表示工件0,1,0,2,1...
-            os = []
+            # 1. OS 编码: 使用混沌序列辅助生成工序排列
+            os_base = []
             for job_id, num_ops in enumerate(self.ops_per_job):
-                os.extend([job_id] * num_ops)
-            random.shuffle(os)
+                os_base.extend([job_id] * num_ops)
+            # 用混沌序列对 OS 进行排列（替代 random.shuffle）
+            chaotic_os = self._chaotic_sequence(len(os_base), x0=random.random() * 0.8 + 0.1)
+            os = [x for _, x in sorted(zip(chaotic_os, os_base), key=lambda pair: pair[0])]
             
-            # 2. MS 编码: 每个工序随机选择一个可选机器
+            # 2. MS 编码: 使用混沌序列选择机器
             ms = []
+            chaotic_ms = self._chaotic_sequence(self.total_ops, x0=random.random() * 0.8 + 0.1)
+            idx = 0
             for job_id, job in enumerate(self.jobs):
                 for op_id, op in enumerate(job):
-                    # 随机选择一个可用机器索引（0 ~ len(machines)-1）
-                    choice = random.randint(0, len(op["machines"]) - 1)
+                    # 混沌值映射到机器索引 [0, num_machines)
+                    choice = int(chaotic_ms[idx] * len(op["machines"])) % len(op["machines"])
                     ms.append(choice)
+                    idx += 1
             
             population.append({"os": os, "ms": ms, "fitness": None, "cmax": None, "load_var": None})
         return population
@@ -254,13 +271,17 @@ class GA:
             if alns is not None:
                 # 提取当前种群最优的 elite_count 个个体
                 sorted_pop = sorted(self.population, key=lambda ind: (ind["cmax"], ind["load_var"]))
-                for i in range(min(self.elite_count, len(sorted_pop))):
-                    improved = alns.optimize(sorted_pop[i], self)
-                    if improved["cmax"] < sorted_pop[i]["cmax"]:
-                        # 替换原个体
-                        sorted_pop[i] = improved
-                # 更新种群
-                self.population = sorted_pop + self.population[self.elite_count:]
+                elites = sorted_pop[:self.elite_count]
+                non_elites = sorted_pop[self.elite_count:]
+                
+                # 对精英个体执行 ALNS 局部深搜
+                for i in range(len(elites)):
+                    improved = alns.optimize(elites[i], self)
+                    if improved["cmax"] < elites[i]["cmax"]:
+                        elites[i] = improved
+                
+                # 精英替换策略：ALNS优化后的精英替换种群中最差的个体
+                self.population = elites + non_elites
 
             if rl_controller is not None:
                 new_best_cmax = min(ind["cmax"] for ind in self.population)

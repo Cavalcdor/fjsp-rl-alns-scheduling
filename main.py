@@ -64,14 +64,26 @@ def main():
         print(f"\n最优解 Cmax: {best['cmax']:.2f}")
         print(f"设备负荷方差: {best['load_var']:.2f}")
         
-        # 解码并评估
+        # 解码得到 assignment (job_id, op_id, machine_id, duration)
         assignment = ga.decode(best)
-        metrics = evaluate_schedule(assignment, num_jobs, num_machines)
+        
+        # 模拟调度，将 duration 转换为 (start, end) 时间
+        mach_time = [0] * num_machines
+        job_time = [0] * num_jobs
+        standard_schedule = []
+        for (job_id, op_id, machine_id, duration) in assignment:
+            start = max(mach_time[machine_id], job_time[job_id])
+            end = start + duration
+            standard_schedule.append((job_id, op_id, machine_id, start, end))
+            mach_time[machine_id] = end
+            job_time[job_id] = end
+        
+        metrics = evaluate_schedule(standard_schedule, num_jobs, num_machines)
         print_metrics(metrics, "静态调度评估结果")
         
         # 绘制甘特图
         try:
-            plot_schedule_analysis(assignment, num_jobs, num_machines, 
+            plot_schedule_analysis(standard_schedule, num_jobs, num_machines, 
                                    save_path="output/gantt_static.png", show=False)
             print("甘特图已保存至: output/gantt_static.png")
         except Exception as e:

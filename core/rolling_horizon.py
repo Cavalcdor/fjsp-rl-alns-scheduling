@@ -42,7 +42,30 @@ class RollingHorizon:
         
         # 历史扰动记录（可选）
         self.disturbance_log = []
+    
+    def insert_new_job(self, new_job_operations, arrival_time):
+        """
+        处理紧急插单事件：插入高优先级新工件
         
+        参数:
+            new_job_operations: list, 新工件的工序列表
+                格式: [{"machines": [...], "times": [...]}, ...]
+            arrival_time: float, 新工件到达时间
+        """
+        new_job_id = len(self.jobs)
+        # 将新工件加入工件列表
+        self.jobs.append(new_job_operations)
+        # 初始化新工件的进度跟踪
+        self.job_next_op.append(0)
+        # 记录插单事件
+        self.disturbance_log.append({
+            "time": arrival_time,
+            "type": "new_job_arrival",
+            "job_id": new_job_id
+        })
+        print(f"[插单事件] 时间 {arrival_time:.2f}: 新工件 J{new_job_id} 到达，"
+              f"共 {len(new_job_operations)} 道工序")
+    
     def apply_degradation(self, machine_id):
         """对指定机器的后续工序应用退化系数"""
         # 实际加工时间会在调度时动态调整，此处标记退化因子影响
@@ -189,10 +212,6 @@ class RollingHorizon:
         执行当前窗口的前半段（或固定时间长度），返回实际执行的工序片段
         window_ratio: 执行窗口的比例（通常为0.5，即执行一半后重调度）
         """
-        # 需要基于 assignment 模拟执行，考虑实际扰动（退化、随机波动）
-        # 先模拟获得每个工序的计划开始时间（假设无扰动）
-        # 然后按时间顺序执行，直到达到窗口长度或所有工序完成
-        # 此处为简化，我们直接取 assignment 的前一半工序数执行（更好的做法是基于时间）
         half = int(len(assignment) * window_ratio)
         if half == 0:
             half = 1
@@ -202,22 +221,24 @@ class RollingHorizon:
         executed = []
         # 机器可用时间（临时模拟）
         mach_avail = self.machine_available_time[:]
-        job_next = self.job_next_op[:]
+        # 工件上一道工序的完成时间（关键：保证工序先后约束）
+        job_avail = [0.0] * len(self.jobs)
+        # 初始化：每个工件的下一道待加工工序的可用时间 = 当前时间
+        for job_id in range(len(self.jobs)):
+            job_avail[job_id] = self.current_time
         
         for (job_id, op_id, machine_id, base_duration) in planned_segment:
-            # 计算实际加工时间
+            # 计算实际加工时间（含退化 + 随机波动）
             actual_duration = self.get_actual_processing_time(base_duration, machine_id)
-            # 开始时间 = max(机器空闲, 该工件上一工序完成时间)
-            # 需要知道该工件上一工序的完成时间，这里简化用 job_next 表示当前工序索引的前一道完成时间？
-            # 我们记录每个工件的上一个完成时间
-            # 由于我们没有维护工件完成时间数组，先简单用机器空闲时间模拟
-            start = mach_avail[machine_id]
+            # 开始时间 = max(机器空闲时间, 该工件上一工序完成时间)
+            start = max(mach_avail[machine_id], job_avail[job_id])
             end = start + actual_duration
             executed.append((job_id, op_id, machine_id, start, end, actual_duration))
+            # 更新机器可用时间
             mach_avail[machine_id] = end
-            # 注意：这里忽略了同一工件的工序顺序约束（因为 assignment 本身是合法的顺序）
-            # 实际应该确保 job 的前置工序已完成，由于 assignment 是合法序列，job_id 在列表中顺序出现，已经保证了顺序，这里只需更新该工件的“最后完成时间”即可。
-            # 为简单，暂不维护工件完成时间，因为 assignment 是拓扑序，不会违反约束。
+            # 更新该工件的完成时间（保证后续工序必须等本工序完成）
+            job_avail[job_id] = end
+            # 注意：machine_process_count 的递增由 update_state 统一管理，此处不重复计数
         
         return executed
     
@@ -249,8 +270,11 @@ class RollingHorizon:
                 print("所有工件加工完成！")
                 break
             
-            # 5. 周期触发或事件触发（简单按固定周期）
-            # 这里我们直接循环，每次执行半个窗口后重调度，相当于周期驱动
+            # 5. 检查是否触发重调度（事件驱动 + 周期驱动）
+            # 在实际运行中，此处可检测外部事件（如插单、机器故障等）
+            # 当前默认按固定周期（窗口执行后）自动触发重调度
+            self.check_trigger(event_type=None, current_time=self.current_time)
+            
             iteration += 1
             if max_time and self.current_time >= max_time:
                 break
@@ -259,9 +283,3 @@ class RollingHorizon:
         print(f"\n调度完成，总完工时间: {self.current_time}")
         print(f"总执行工序数: {len(self.schedule)}")
         return self.schedule
-
-
-# 测试代码（简化）
-if __name__ == "__main__":
-    # 需要 config, jobs 等，此处仅示意
-    print("RollingHorizon modugit add core/rolling_horizon.pyle loaded.")
