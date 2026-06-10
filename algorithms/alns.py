@@ -301,6 +301,13 @@ class ALNS:
             job_id = rem["job_id"]
             op_id = rem["op_id"]
             ms_idx = rem["ms_idx"]
+            original_ms_choice = rem["ms_choice"]
+
+            # 获取该工序的可选机器数量，确保机器选择索引有效
+            op_data = self.jobs[job_id][op_id]
+            num_available_machines = len(op_data["machines"])
+            # 如果原始机器选择索引超出范围，修正为合法值
+            safe_ms_choice = original_ms_choice % num_available_machines
 
             # 在 OS 中插入该工序，使该工件的第 op_id 道工序保持正确顺序
             insert_pos = len(new_individual["os"])
@@ -315,9 +322,9 @@ class ALNS:
 
             # 在 MS 中插回原始位置，保持全局机器选择编码长度一致
             if ms_idx <= len(new_individual["ms"]):
-                new_individual["ms"].insert(ms_idx, rem["ms_choice"])
+                new_individual["ms"].insert(ms_idx, safe_ms_choice)
             else:
-                new_individual["ms"].append(rem["ms_choice"])
+                new_individual["ms"].append(safe_ms_choice)
 
         return new_individual
     
@@ -381,7 +388,7 @@ class ALNS:
                     job_occurrences += 1
             new_individual["os"].insert(insert_pos, job_id)
             
-            # 在 MS 中插回原始位置，但使用新选择的机器
+            # 在 MS 中插回原始位置，使用新选择的合法机器索引
             if ms_idx <= len(new_individual["ms"]):
                 new_individual["ms"].insert(ms_idx, best_machine_idx)
             else:
