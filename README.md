@@ -203,9 +203,6 @@ DEFAULT_INSTANCE = "your_instance.fjs"
 
 ## 📚 参考文献
 
-1. Brandimarte, P. (1993). Routing and scheduling in a flexible job shop by tabu search.
-2. Pisinger, D., & Ropke, S. (2010). Large neighborhood search.
-3. Sutton, R. S., & Barto, A. G. (2018). Reinforcement learning: An introduction.
 
 ## 📄 许可证
 
@@ -219,4 +216,4 @@ MIT License
 
 **作者**: 智能制造调度研究组  
 **版本**: 1.0.0  
-**最后更新**: 2024
+**最后更新**: 2026-06-10

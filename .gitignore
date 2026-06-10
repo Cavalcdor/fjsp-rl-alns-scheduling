@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+*.egg-info/
+dist/
+*.egg
+
+# Virtual Environment
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Output and Results
+output/
+results/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.pdf
+
+# Logs
+*.log
+logs/
+
+# Data (如果需要忽略数据文件，取消下面注释)
+# data/*.fjs
+# data/**/*.fjs
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+*.temp
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Distribution / packaging
+*.whl
+*.tar.gz
+*.zip
+
+# Type checkers
+.mypy_cache/
+.pytype/

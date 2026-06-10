@@ -90,6 +90,24 @@ class ALNS:
                 self._ms_start_idx.append(total)
                 total += self.ops_per_job[j]
         return self._ms_start_idx[job_id] + op_id
+
+    def _rebuild_ms(self, os_list, original_ms):
+        """
+        根据剩余 OS 序列重建 MS 数组
+        原理：OS 中每个 job_id 的第 k 次出现，对应该 job 的第 k 道工序，
+        取原始 MS 中对应位置的机器选择值
+        """
+        job_op_counter = [0] * self.num_jobs
+        new_ms = []
+        for job_id in os_list:
+            op_id = job_op_counter[job_id]
+            ms_idx = self._get_ms_index(job_id, op_id)
+            if ms_idx < len(original_ms):
+                new_ms.append(original_ms[ms_idx])
+            else:
+                new_ms.append(0)  # 安全回退
+            job_op_counter[job_id] += 1
+        return new_ms
     
     def encode_from_assignment(self, assignment):
         """
@@ -130,7 +148,6 @@ class ALNS:
         total_ops = len(new_individual["os"])
         indices = random.sample(range(total_ops), destroy_size)
         indices.sort(reverse=True)
-        ms_to_remove = []
         for idx in indices:
             job_id = new_individual["os"][idx]
             current_op = new_individual["os"][:idx].count(job_id)
@@ -143,9 +160,8 @@ class ALNS:
                 "ms_choice": new_individual["ms"][ms_idx]
             })
             del new_individual["os"][idx]
-            ms_to_remove.append(ms_idx)
-        for ms_idx in sorted(ms_to_remove, reverse=True):
-            del new_individual["ms"][ms_idx]
+        # 根据剩余 OS 重建 MS（避免索引错位）
+        new_individual["ms"] = self._rebuild_ms(new_individual["os"], individual["ms"])
         return new_individual, removed
     
     def destroy_critical_path(self, individual, destroy_size):
@@ -206,9 +222,7 @@ class ALNS:
         
         # 重建个体（移除所选工序）
         os_list = individual["os"][:]
-        ms_list = individual["ms"][:]
         removed = []
-        ms_to_remove = []
         
         for op_info in selected_ops:
             idx = op_info["idx"]
@@ -221,15 +235,13 @@ class ALNS:
                 "job_id": job_id,
                 "op_id": op_id,
                 "ms_idx": ms_idx,
-                "ms_choice": ms_list[ms_idx]
+                "ms_choice": individual["ms"][ms_idx]
             })
             del os_list[idx]
-            ms_to_remove.append(ms_idx)
         
-        for ms_idx in sorted(ms_to_remove, reverse=True):
-            del ms_list[ms_idx]
-        
-        new_individual = {"os": os_list, "ms": ms_list}
+        # 根据剩余 OS 重建 MS（避免索引错位）
+        new_ms = self._rebuild_ms(os_list, individual["ms"])
+        new_individual = {"os": os_list, "ms": new_ms}
         return new_individual, removed
     
     def destroy_high_load_machine(self, individual, destroy_size):
@@ -258,9 +270,7 @@ class ALNS:
         selected.sort(reverse=True)
         # 重建个体（移除所选工序）
         os_list = individual["os"][:]
-        ms_list = individual["ms"][:]
         removed = []
-        ms_to_remove = []
         for idx in selected:
             job_id = os_list[idx]
             op_id = os_list[:idx].count(job_id)
@@ -270,13 +280,12 @@ class ALNS:
                 "job_id": job_id,
                 "op_id": op_id,
                 "ms_idx": ms_idx,
-                "ms_choice": ms_list[ms_idx]
+                "ms_choice": individual["ms"][ms_idx]
             })
             del os_list[idx]
-            ms_to_remove.append(ms_idx)
-        for ms_idx in sorted(ms_to_remove, reverse=True):
-            del ms_list[ms_idx]
-        new_individual = {"os": os_list, "ms": ms_list}
+        # 根据剩余 OS 重建 MS（避免索引错位）
+        new_ms = self._rebuild_ms(os_list, individual["ms"])
+        new_individual = {"os": os_list, "ms": new_ms}
         return new_individual, removed
     
     def repair_greedy(self, individual, removed):
@@ -285,8 +294,9 @@ class ALNS:
         removed: 列表，每个元素包含 job_id, op_id, ms_idx。
         """
         new_individual = copy.deepcopy(individual)
-        # 先按 ms_idx 升序处理，保证 ms 编码正确插回原始位置
-        removed_sorted = sorted(removed, key=lambda item: item["ms_idx"])
+        # 按 ms_idx 降序插入，避免先插入的工序推移后续插入位置
+        removed_sorted = sorted(removed, key=lambda item: item["ms_idx"], reverse=True)
+        
         for rem in removed_sorted:
             job_id = rem["job_id"]
             op_id = rem["op_id"]
@@ -319,11 +329,18 @@ class ALNS:
         """
         new_individual = copy.deepcopy(individual)
         
-        # 先解码当前个体，计算机器当前负荷
-        current_assignment = self.decode(new_individual)
+        # 直接从 OS/MS 数组计算机器当前负荷（不使用 decode，避免索引越界）
         machine_current_load = [0] * self.num_machines
-        for (job_id, op_id, machine_id, duration) in current_assignment:
-            machine_current_load[machine_id] += duration
+        job_op_counter = [0] * self.num_jobs
+        for i, job_id in enumerate(new_individual["os"]):
+            op_id = job_op_counter[job_id]
+            machine_choice = new_individual["ms"][i]
+            op_data = self.jobs[job_id][op_id]
+            if machine_choice < len(op_data["machines"]):
+                machine_id = op_data["machines"][machine_choice]
+                duration = op_data["times"][machine_choice]
+                machine_current_load[machine_id] += duration
+            job_op_counter[job_id] += 1
         
         # 按 ms_idx 升序处理被移除的工序，保证正确插回
         removed_sorted = sorted(removed, key=lambda item: item["ms_idx"])
