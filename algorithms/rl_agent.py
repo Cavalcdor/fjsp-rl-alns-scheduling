@@ -36,6 +36,8 @@ class RLController:
         # 当前状态和动作（用于更新）
         self.current_state = None
         self.current_action = None
+        self.current_pc = (self.pc_min + self.pc_max) / 2
+        self.current_pm = (self.pm_min + self.pm_max) / 2
         
         # 记录历史奖励（用于监控）
         self.reward_history = []
@@ -166,6 +168,8 @@ class RLController:
         # 对变异概率调整（注意变异概率通常较小，调整幅度可以共用 delta，但需独立边界）
         new_pm = pm + delta
         new_pm = np.clip(new_pm, self.pm_min, self.pm_max)
+        self.current_pc = new_pc
+        self.current_pm = new_pm
         return new_pc, new_pm
     
     def reset_episode(self):

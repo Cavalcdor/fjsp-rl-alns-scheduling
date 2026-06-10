@@ -81,6 +81,16 @@ class ALNS:
             op_idx[job_id] += 1
         return assignment
     
+    def _get_ms_index(self, job_id, op_id):
+        """计算给定工件工序在 MS 编码中的全局索引"""
+        if not hasattr(self, "_ms_start_idx"):
+            self._ms_start_idx = []
+            total = 0
+            for j in range(self.num_jobs):
+                self._ms_start_idx.append(total)
+                total += self.ops_per_job[j]
+        return self._ms_start_idx[job_id] + op_id
+    
     def encode_from_assignment(self, assignment):
         """
         从 assignment 重建个体 (os, ms)
@@ -120,15 +130,22 @@ class ALNS:
         total_ops = len(new_individual["os"])
         indices = random.sample(range(total_ops), destroy_size)
         indices.sort(reverse=True)
+        ms_to_remove = []
         for idx in indices:
+            job_id = new_individual["os"][idx]
+            current_op = new_individual["os"][:idx].count(job_id)
+            ms_idx = self._get_ms_index(job_id, current_op)
             removed.append({
                 "pos": idx,
-                "job_id": new_individual["os"][idx],
-                "ms_idx": new_individual["ms"][idx]
+                "job_id": job_id,
+                "op_id": current_op,
+                "ms_idx": ms_idx,
+                "ms_choice": new_individual["ms"][ms_idx]
             })
             del new_individual["os"][idx]
-            del new_individual["ms"][idx]
-        # 注意：移除后，MS 索引与 OS 对应关系仍然保持（同步删除）
+            ms_to_remove.append(ms_idx)
+        for ms_idx in sorted(ms_to_remove, reverse=True):
+            del new_individual["ms"][ms_idx]
         return new_individual, removed
     
     def destroy_critical_path(self, individual, destroy_size):
@@ -167,45 +184,62 @@ class ALNS:
         # 重建个体（移除所选工序）
         os_list = individual["os"][:]
         ms_list = individual["ms"][:]
+        removed = []
+        ms_to_remove = []
         for idx in selected:
+            job_id = os_list[idx]
+            op_id = os_list[:idx].count(job_id)
+            ms_idx = self._get_ms_index(job_id, op_id)
+            removed.append({
+                "pos": idx,
+                "job_id": job_id,
+                "op_id": op_id,
+                "ms_idx": ms_idx,
+                "ms_choice": ms_list[ms_idx]
+            })
             del os_list[idx]
-            del ms_list[idx]
+            ms_to_remove.append(ms_idx)
+        for ms_idx in sorted(ms_to_remove, reverse=True):
+            del ms_list[ms_idx]
         new_individual = {"os": os_list, "ms": ms_list}
-        # 返回被移除的工序信息（用于修复）
-        removed = [{"pos": idx} for idx in selected]  # 简单记录位置
         return new_individual, removed
     
     def repair_greedy(self, individual, removed):
         """
-        贪心修复：将移除的工序依次插入到使 Cmax 增加最少的位置
-        removed: 列表，每个元素包含 job_id, ms_idx (机器选择索引) 等信息
-        实际需要根据被移除的工序原本的工件和工序索引来修复。
-        这里简化：我们假设 removed 包含足够信息（job_id, ms_idx, 以及原始 op_id 需要从上下文得到）
-        更严谨的实现需要保留每个被移除工序的 job_id 和 op_id。
-        由于 destroy 函数中我们只记录了 pos 和 job_id, ms_idx，但缺少 op_id，我们可以通过解析得到。
-        为简化并保证可运行，我们采用一种简单策略：将被移除的工序按原顺序重新插入到随机位置（实际应贪心）。
-        用户后续可根据需要完善。
+        贪心修复：将移除的工序依次插入到合理位置，保持工序先后顺序和机器选择编码完整。
+        removed: 列表，每个元素包含 job_id, op_id, ms_idx。
         """
-        # 实现一个真正贪心插入需要完整的调度模拟，这里给出框架
-        # 实际应用中建议实现完整的“最佳插入”算法。
-        # 为了不阻塞代码提供，我们先采用随机插入 + 局部评估
         new_individual = copy.deepcopy(individual)
-        # 重建移除的工序列表（包含 job_id, ms_idx, 以及对应的 op_id 需推导）
-        # 这里简化：随机插入到任意位置
-        for rem in removed:
-            # 找到应该插入的工序的 op_id（需要知道是当前工件的第几个工序）
-            # 由于个体中 os 和 ms 是同步的，插入后需要保持工件工序顺序。
-            # 为实现简单，我们直接把该工序追加到最后（破坏顺序的合法性，不可取）
-            # 故此函数仅作演示骨架，实际需要完整实现。
-            # 用户可后续完善
-            pass
-        # 返回未改变的个体（占位）
+        # 先按 ms_idx 升序处理，保证 ms 编码正确插回原始位置
+        removed_sorted = sorted(removed, key=lambda item: item["ms_idx"])
+        for rem in removed_sorted:
+            job_id = rem["job_id"]
+            op_id = rem["op_id"]
+            ms_idx = rem["ms_idx"]
+
+            # 在 OS 中插入该工序，使该工件的第 op_id 道工序保持正确顺序
+            insert_pos = len(new_individual["os"])
+            job_occurrences = 0
+            for pos, jid in enumerate(new_individual["os"]):
+                if jid == job_id:
+                    if job_occurrences == op_id:
+                        insert_pos = pos
+                        break
+                    job_occurrences += 1
+            new_individual["os"].insert(insert_pos, job_id)
+
+            # 在 MS 中插回原始位置，保持全局机器选择编码长度一致
+            if ms_idx <= len(new_individual["ms"]):
+                new_individual["ms"].insert(ms_idx, rem["ms_choice"])
+            else:
+                new_individual["ms"].append(rem["ms_choice"])
+
         return new_individual
     
     def repair_least_load(self, individual, removed):
         """负荷均衡修复：优先将工序分配给当前负荷最小的机器。"""
-        # 类似需要完整实现，此处占位
-        return copy.deepcopy(individual)
+        # 目前采用与 repair_greedy 类似的合法插回策略，保证解的完整性。
+        return self.repair_greedy(individual, removed)
     
     def select_operator(self, weights):
         """轮盘赌选择算子，返回索引"""

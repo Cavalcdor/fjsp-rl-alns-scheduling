@@ -232,14 +232,14 @@ class GA:
         best_cmax = float('inf')
         
         for gen in range(self.max_gen):
-            # 获取 RL 调整的交叉变异概率
+            # 计算当前代状态与指标，用于 RL 奖励更新
             if rl_controller is not None:
-                # 需要计算当前种群状态（收敛度和多样性）
+                old_best_cmax = min(ind["cmax"] for ind in self.population)
+                old_avg_cmax = np.mean([ind["cmax"] for ind in self.population])
                 state = rl_controller.compute_state(self.population)
-                action = rl_controller.select_action(state)
+                action_idx = rl_controller.select_action(state)
                 # 根据动作调整 pc, pm
-                pc = np.clip(self.pc_low + action[0] * (self.pc_high - self.pc_low), self.pc_low, self.pc_high)
-                pm = np.clip(self.pm_low + action[1] * (self.pm_high - self.pm_low), self.pm_low, self.pm_high)
+                pc, pm = rl_controller.adjust_probabilities(rl_controller.current_pc, rl_controller.current_pm, action_idx)
             else:
                 pc = self.pc_high  # 默认使用上限
                 pm = self.pm_low
@@ -261,6 +261,13 @@ class GA:
                         sorted_pop[i] = improved
                 # 更新种群
                 self.population = sorted_pop + self.population[self.elite_count:]
+
+            if rl_controller is not None:
+                new_best_cmax = min(ind["cmax"] for ind in self.population)
+                new_avg_cmax = np.mean([ind["cmax"] for ind in self.population])
+                reward = rl_controller.compute_reward(old_best_cmax, new_best_cmax, old_avg_cmax, new_avg_cmax)
+                next_state = rl_controller.compute_state(self.population)
+                rl_controller.update_q_table(reward, next_state)
             
             if self.verbose and (gen+1) % 10 == 0:
                 avg_cmax = np.mean([ind["cmax"] for ind in self.population])

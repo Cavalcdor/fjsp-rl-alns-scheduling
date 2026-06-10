@@ -28,7 +28,7 @@ class RollingHorizon:
         
         # 重调度触发方式
         self.trigger_type = config.TRIGGER_TYPE
-        self.periodic_interval = config.PERICDIC_INTERVAL  # 注意 config 中拼写为 PERIODIC_INTERVAL
+        self.periodic_interval = config.PERIODIC_INTERVAL
         
         # 车间状态
         self.current_time = 0  # 当前调度时间点
