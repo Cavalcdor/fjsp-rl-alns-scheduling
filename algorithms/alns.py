@@ -151,11 +151,86 @@ class ALNS:
     def destroy_critical_path(self, individual, destroy_size):
         """
         关键路径破坏：基于当前调度，找出关键路径上的工序并优先移除
-        简化实现：随机移除，但偏向选择加工时间长的工序
+        
+        关键路径是指决定最大完工时间的最长路径，破坏关键路径上的工序
+        更有可能改善 makespan
         """
-        # 为了提高效率，我们简化：先评估获得每个工序的结束时间等信息
-        # 为了不复杂化，这里退化为随机破坏（可后续改进）
-        return self.destroy_random(individual, destroy_size)
+        # 首先解码并评估，获取每个工序的开始/结束时间
+        assignment = self.decode(individual)
+        
+        # 模拟调度，计算每个工序的开始/结束时间
+        machine_available = [0] * self.num_machines
+        job_completion = [0] * self.num_jobs
+        op_schedule = []  # 存储每个工序的调度信息
+        
+        for idx, (job_id, op_id, machine_id, duration) in enumerate(assignment):
+            start = max(machine_available[machine_id], job_completion[job_id])
+            end = start + duration
+            op_schedule.append({
+                "idx": idx,
+                "job_id": job_id,
+                "op_id": op_id,
+                "machine_id": machine_id,
+                "start": start,
+                "end": end,
+                "duration": duration
+            })
+            machine_available[machine_id] = end
+            job_completion[job_id] = end
+        
+        # 找出关键路径上的工序（结束时间等于 makespan 的工序，以及其前驱）
+        makespan = max(job_completion)
+        
+        # 简化策略：优先选择结束时间接近 makespan 的工序
+        # 计算每个工序的"关键度" = end / makespan
+        for op_info in op_schedule:
+            op_info["criticality"] = op_info["end"] / (makespan + 1e-6)
+        
+        # 按关键度排序，选择最关键的工序
+        sorted_ops = sorted(op_schedule, key=lambda x: x["criticality"], reverse=True)
+        
+        # 选择要破坏的工序（优先选择关键度高的）
+        selected_count = min(destroy_size, len(sorted_ops))
+        selected_ops = sorted_ops[:selected_count]
+        
+        # 如果关键路径工序不够，补充其他长加工时间工序
+        if selected_count < destroy_size:
+            remaining_ops = [op for op in sorted_ops if op not in selected_ops]
+            # 按加工时间降序排序
+            remaining_ops.sort(key=lambda x: x["duration"], reverse=True)
+            additional = remaining_ops[:destroy_size - selected_count]
+            selected_ops.extend(additional)
+        
+        # 按索引降序排序，便于从后往前移除
+        selected_ops.sort(key=lambda x: x["idx"], reverse=True)
+        
+        # 重建个体（移除所选工序）
+        os_list = individual["os"][:]
+        ms_list = individual["ms"][:]
+        removed = []
+        ms_to_remove = []
+        
+        for op_info in selected_ops:
+            idx = op_info["idx"]
+            job_id = op_info["job_id"]
+            op_id = op_info["op_id"]
+            ms_idx = self._get_ms_index(job_id, op_id)
+            
+            removed.append({
+                "pos": idx,
+                "job_id": job_id,
+                "op_id": op_id,
+                "ms_idx": ms_idx,
+                "ms_choice": ms_list[ms_idx]
+            })
+            del os_list[idx]
+            ms_to_remove.append(ms_idx)
+        
+        for ms_idx in sorted(ms_to_remove, reverse=True):
+            del ms_list[ms_idx]
+        
+        new_individual = {"os": os_list, "ms": ms_list}
+        return new_individual, removed
     
     def destroy_high_load_machine(self, individual, destroy_size):
         """
@@ -237,10 +312,66 @@ class ALNS:
         return new_individual
     
     def repair_least_load(self, individual, removed):
-        """负荷均衡修复：优先将工序分配给当前负荷最小的机器。"""
-        # 目前采用与 repair_greedy 类似的合法插回策略，保证解的完整性。
-        return self.repair_greedy(individual, removed)
-    
+        """
+        负荷均衡修复：优先将工序分配给当前负荷最小的机器
+        
+        与贪心修复不同，该算子会重新选择机器，以平衡各机器负荷
+        """
+        new_individual = copy.deepcopy(individual)
+        
+        # 先解码当前个体，计算机器当前负荷
+        current_assignment = self.decode(new_individual)
+        machine_current_load = [0] * self.num_machines
+        for (job_id, op_id, machine_id, duration) in current_assignment:
+            machine_current_load[machine_id] += duration
+        
+        # 按 ms_idx 升序处理被移除的工序，保证正确插回
+        removed_sorted = sorted(removed, key=lambda item: item["ms_idx"])
+        
+        for rem in removed_sorted:
+            job_id = rem["job_id"]
+            op_id = rem["op_id"]
+            ms_idx = rem["ms_idx"]
+            
+            # 获取该工序的可选机器
+            op_data = self.jobs[job_id][op_id]
+            available_machines = op_data["machines"]
+            available_times = op_data["times"]
+            
+            # 选择当前负荷最小的可选机器
+            best_machine_idx = 0
+            min_load = float('inf')
+            
+            for i, machine_id in enumerate(available_machines):
+                # 考虑机器当前负荷 + 该工序在该机器上的加工时间
+                effective_load = machine_current_load[machine_id] + available_times[i]
+                if effective_load < min_load:
+                    min_load = effective_load
+                    best_machine_idx = i
+            
+            # 更新机器负荷
+            chosen_machine = available_machines[best_machine_idx]
+            machine_current_load[chosen_machine] += available_times[best_machine_idx]
+            
+            # 在 OS 中插入该工序，保持工件工序顺序
+            insert_pos = len(new_individual["os"])
+            job_occurrences = 0
+            for pos, jid in enumerate(new_individual["os"]):
+                if jid == job_id:
+                    if job_occurrences == op_id:
+                        insert_pos = pos
+                        break
+                    job_occurrences += 1
+            new_individual["os"].insert(insert_pos, job_id)
+            
+            # 在 MS 中插回原始位置，但使用新选择的机器
+            if ms_idx <= len(new_individual["ms"]):
+                new_individual["ms"].insert(ms_idx, best_machine_idx)
+            else:
+                new_individual["ms"].append(best_machine_idx)
+        
+        return new_individual
+
     def select_operator(self, weights):
         """轮盘赌选择算子，返回索引"""
         total = sum(weights)

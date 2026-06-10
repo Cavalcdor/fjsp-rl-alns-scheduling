@@ -5,11 +5,11 @@
 import os
 
 # ========== 1. 文件路径配置 ==========
-# 数据集根目录（你已放置 Brandimarte_Data 的位置）
+# 数据集根目录
 DATA_ROOT = "data/Brandimarte_Data"
 
-# 默认测试算例（可改为 mk02.fjs, mk03.fjs, ...）
-DEFAULT_INSTANCE = "mk01.fjs"
+# 默认测试算例（可改为 Mk02.fjs, Mk03.fjs, ...）
+DEFAULT_INSTANCE = "Mk01.fjs"
 
 # 完整路径（程序自动拼接）
 INSTANCE_PATH = os.path.join(DATA_ROOT, DEFAULT_INSTANCE)

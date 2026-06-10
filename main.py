@@ -12,6 +12,8 @@ import random
 # 导入自定义模块
 from core.instance_parser import load_fjsp_from_file, convert_to_zero_index
 from utils.scheduler import evaluate
+from utils.metrics import evaluate_schedule, print_metrics
+from utils.visualization import plot_gantt_chart, plot_schedule_analysis
 from algorithms.ga import GA
 from algorithms.rl_agent import RLController
 from algorithms.alns import ALNS
@@ -59,18 +61,56 @@ def main():
         # 静态模式：直接用 GA 求解整个问题（不引入扰动）
         print("\n=== 静态 GA 模式 ===")
         best = ga.run(rl_controller=rl, alns=alns)
-        print(f"最优解 Cmax: {best['cmax']:.2f}")
+        print(f"\n最优解 Cmax: {best['cmax']:.2f}")
         print(f"设备负荷方差: {best['load_var']:.2f}")
-        # 可选：输出调度甘特图或详细结果
+        
+        # 解码并评估
+        assignment = ga.decode(best)
+        metrics = evaluate_schedule(assignment, num_jobs, num_machines)
+        print_metrics(metrics, "静态调度评估结果")
+        
+        # 绘制甘特图
+        try:
+            plot_schedule_analysis(assignment, num_jobs, num_machines, 
+                                   save_path="output/gantt_static.png", show=False)
+            print("甘特图已保存至: output/gantt_static.png")
+        except Exception as e:
+            print(f"绘图失败: {e}")
+    
     else:
         # 滚动时域模式（带扰动、重调度）
         print("\n=== 滚动时域模式 ===")
         rh = RollingHorizon(jobs, num_machines, config, ga, rl, alns)
         final_schedule = rh.run()
         print(f"\n最终调度完成，总完工时间: {rh.current_time:.2f}")
+        
+        # 评估最终调度
+        if final_schedule:
+            # 转换为标准格式
+            standard_schedule = [(job_id, op_id, machine_id, start, end) 
+                                 for (job_id, op_id, machine_id, start, end) in final_schedule]
+            metrics = evaluate_schedule(standard_schedule, num_jobs, num_machines)
+            print_metrics(metrics, "滚动时域调度评估结果")
+            
+            # 绘制甘特图
+            try:
+                plot_schedule_analysis(standard_schedule, num_jobs, num_machines,
+                                       save_path="output/gantt_rolling.png", show=False)
+                print("甘特图已保存至: output/gantt_rolling.png")
+            except Exception as e:
+                print(f"绘图失败: {e}")
+        
+        # 输出扰动记录
+        if rh.disturbance_log:
+            print(f"\n扰动记录（共 {len(rh.disturbance_log)} 次）:")
+            for event in rh.disturbance_log:
+                print(f"  时间 {event['time']:.2f}: {event['type']}")
     
     print("\n程序执行完毕。")
 
 if __name__ == "__main__":
+    # 创建输出目录
+    os.makedirs("output", exist_ok=True)
+    
     set_seed(config.RANDOM_SEED)
     main()

@@ -62,15 +62,69 @@ class RollingHorizon:
         actual = degraded * fluctuation
         return max(0.1, actual)  # 避免负时间
     
-    def check_trigger(self):
-        """检查是否需要触发重调度（事件驱动或周期驱动）"""
+    def check_trigger(self, event_type=None, current_time=None):
+        """
+        检查是否需要触发重调度
+        
+        参数:
+            event_type: str, 事件类型（可选）
+                - "machine_breakdown": 机器故障
+                - "new_job_arrival": 新工件到达
+                - "process_delay": 加工延迟
+                - None: 自动判断
+            current_time: float, 当前时间（可选）
+        
+        返回:
+            trigger: bool, 是否触发重调度
+        """
         if self.trigger_type == "periodic":
-            # 每隔固定时间触发
-            return self.current_time >= self.next_trigger_time
-        else:
-            # 事件驱动：需要外部调用时显式传入扰动标志，这里简单返回 False，由主循环控制
+            # 周期驱动：每隔固定时间触发
+            if current_time is None:
+                current_time = self.current_time
+            if not hasattr(self, 'next_trigger_time'):
+                self.next_trigger_time = self.periodic_interval
+            if current_time >= self.next_trigger_time:
+                self.next_trigger_time = current_time + self.periodic_interval
+                return True
             return False
-    
+        
+        elif self.trigger_type == "event_driven":
+            # 事件驱动：检测到特定事件时触发
+            if event_type is not None:
+                # 记录事件
+                self.disturbance_log.append({
+                    "time": current_time or self.current_time,
+                    "type": event_type
+                })
+                return True
+            
+            # 自动检测：检查是否有显著偏差
+            # 例如：实际完工时间超过预期的一定比例
+            if hasattr(self, 'expected_completion') and self.expected_completion:
+                if current_time and current_time > self.expected_completion * 1.1:
+                    return True
+            
+            return False
+        
+        else:
+            # 混合驱动：周期 + 事件
+            periodic_trigger = False
+            if hasattr(self, 'next_trigger_time'):
+                if current_time is None:
+                    current_time = self.current_time
+                if current_time >= self.next_trigger_time:
+                    self.next_trigger_time = current_time + self.periodic_interval
+                    periodic_trigger = True
+            
+            event_trigger = event_type is not None
+            if event_trigger:
+                self.disturbance_log.append({
+                    "time": current_time or self.current_time,
+                    "type": event_type
+                })
+            
+            return periodic_trigger or event_trigger
+
     def get_remaining_subproblem(self):
         """
         获取当前剩余未调度的工序，构成新的 FJSP 子问题
