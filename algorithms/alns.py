@@ -278,6 +278,11 @@ class ALNS:
         """
         高负荷机器破坏：找出当前调度中负荷最高的机器，优先移除该机器上的部分工序
         """
+        # 安全边界检查：确保 destroy_size 不超过个体长度
+        actual_destroy_size = min(destroy_size, len(individual["os"]))
+        if actual_destroy_size == 0:
+            return individual, []
+        
         # 直接基于 individual["os"] 和 individual["ms"] 计算机器负荷，避免解码
         machine_load = [0] * self.num_machines
         job_op_counter = [0] * self.num_jobs
@@ -309,13 +314,13 @@ class ALNS:
                     indices_on_machine.append(i)
             job_op_counter[job_id] += 1
         
-        if len(indices_on_machine) < destroy_size:
+        if len(indices_on_machine) < actual_destroy_size:
             # 如果不够，随机补齐
             all_indices = list(range(len(individual["os"])))
-            additional = random.sample(all_indices, destroy_size - len(indices_on_machine))
+            additional = random.sample(all_indices, actual_destroy_size - len(indices_on_machine))
             indices_on_machine.extend(additional)
         
-        selected = random.sample(indices_on_machine, destroy_size)
+        selected = random.sample(indices_on_machine, actual_destroy_size)
         selected.sort(reverse=True)
         
         # 重建个体（移除所选工序）
@@ -504,7 +509,21 @@ class ALNS:
             # 选择破坏和修复算子
             d_idx = self.select_operator(self.destroy_weights)
             r_idx = self.select_operator(self.repair_weights)
-            destroy_size = random.randint(self.destroy_min, self.destroy_max)
+            
+            # 关键修复：确保 destroy_size 不超过当前个体的工序数
+            current_ops_count = len(current["os"])
+            if current_ops_count <= 1:
+                # 如果只剩1个或0个工序，无法破坏，直接跳过
+                break
+            
+            # destroy_size 应该在 [min, min(max, current_ops_count-1)] 范围内
+            safe_destroy_max = min(self.destroy_max, current_ops_count - 1)
+            if safe_destroy_max < self.destroy_min:
+                safe_destroy_size = 1  # 至少破坏1个
+            else:
+                safe_destroy_size = random.randint(self.destroy_min, safe_destroy_max)
+            
+            destroy_size = safe_destroy_size
             
             # 记录使用次数
             self.destroy_counts[d_idx] += 1
