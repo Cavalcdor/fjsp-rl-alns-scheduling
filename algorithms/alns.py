@@ -191,19 +191,28 @@ class ALNS:
         关键路径是指决定最大完工时间的最长路径，破坏关键路径上的工序
         更有可能改善 makespan
         """
-        # 首先解码并评估，获取每个工序的开始/结束时间
-        assignment = self.decode(individual)
-        
-        # 模拟调度，计算每个工序的开始/结束时间
+        # 直接基于 individual 计算调度，避免解码assignment
         machine_available = [0] * self.num_machines
         job_completion = [0] * self.num_jobs
         op_schedule = []  # 存储每个工序的调度信息
         
-        for idx, (job_id, op_id, machine_id, duration) in enumerate(assignment):
+        job_op_counter = [0] * self.num_jobs
+        for i, job_id in enumerate(individual["os"]):
+            op_id = job_op_counter[job_id]
+            machine_choice = individual["ms"][i]
+            op_data = self.jobs[job_id][op_id]
+            
+            # 边界检查
+            if machine_choice >= len(op_data["machines"]) or machine_choice < 0:
+                machine_choice = machine_choice % len(op_data["machines"])
+            
+            machine_id = op_data["machines"][machine_choice]
+            duration = op_data["times"][machine_choice]
+            
             start = max(machine_available[machine_id], job_completion[job_id])
             end = start + duration
             op_schedule.append({
-                "idx": idx,
+                "idx": i,  # 这里是OS中的索引，不是assignment中的索引
                 "job_id": job_id,
                 "op_id": op_id,
                 "machine_id": machine_id,
@@ -213,6 +222,7 @@ class ALNS:
             })
             machine_available[machine_id] = end
             job_completion[job_id] = end
+            job_op_counter[job_id] += 1
         
         # 找出关键路径上的工序（结束时间等于 makespan 的工序，以及其前驱）
         makespan = max(job_completion)
