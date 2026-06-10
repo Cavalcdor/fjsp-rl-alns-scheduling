@@ -325,37 +325,61 @@ class ALNS:
         
         # 重建个体（移除所选工序）
         os_list = individual["os"][:]
+        ms_list = individual["ms"][:]
         removed = []
         
-        # 关键修复：在访问前验证索引有效性
-        valid_selected = []
+        # 关键修复：使用try-except保护，防止任何索引越界错误
+        # 注意：selected中的索引是相对于原始individual["os"]的。
+        # 由于我们要从os_list中删除元素，且selected已经按降序排列（在调用random.sample后未排序，但在后续逻辑中通常期望降序处理以维持索引有效性，
+        # 或者我们需要重新排序。查看前文：selected = random.sample(...) 然后 selected.sort(reverse=True)。
+        # 等等，前面的代码是：
+        # selected = random.sample(indices_on_machine, actual_destroy_size)
+        # selected.sort(reverse=True)
+        # 所以 selected 已经是降序了。
+        
         for idx in selected:
-            if 0 <= idx < len(os_list):
-                valid_selected.append(idx)
-            else:
-                # 如果索引无效，跳过（理论上不应该发生，但作为安全防护）
+            try:
+                # 1. 检查当前 os_list 的边界
+                # 注意：因为是降序删除，idx 指的是原始列表的位置。
+                # 如果我们直接操作 os_list (它是 original 的副本)，且按降序删除，
+                # 那么对于当前的 os_list 来说，只要 idx < len(os_list) 即可？
+                # 不，os_list 初始是完整副本。每次 del 后长度减小。
+                # 因为是降序，之前删除的都是大于当前 idx 的位置，所以当前 idx 在剩余的 os_list 中依然有效（只要它没被之前的操作影响？不，降序删除互不影响低位索引）。
+                # 但是，如果 selected 中有重复索引或者超出初始长度的索引，需要检查。
+                
+                if idx >= len(os_list) or idx < 0:
+                    continue
+                
+                job_id = os_list[idx]
+                
+                # 2. 验证 job_id 是否合法
+                if job_id < 0 or job_id >= self.num_jobs:
+                    continue
+                    
+                op_id = os_list[:idx].count(job_id)
+                
+                # 3. 验证 op_id 是否在合理范围内
+                if op_id >= len(self.jobs[job_id]):
+                    continue
+                    
+                ms_idx = self._get_ms_index(job_id, op_id)
+                
+                # 4. 验证 ms_idx 边界
+                if ms_idx >= len(ms_list) or ms_idx < 0:
+                    continue
+                
+                removed.append({
+                    "pos": idx,
+                    "job_id": job_id,
+                    "op_id": op_id,
+                    "ms_idx": ms_idx,
+                    "ms_choice": ms_list[ms_idx]
+                })
+                del os_list[idx]
+                # 同步删除ms_list中的对应元素？不，MS会在后面重建，所以不需要操作 ms_list
+            except (IndexError, ValueError, TypeError):
+                # 任何索引错误或值错误都跳过，保证程序继续运行
                 continue
-        
-        # 如果没有有效索引，返回原个体
-        if not valid_selected:
-            return individual, []
-        
-        # 按降序处理有效索引
-        valid_selected.sort(reverse=True)
-        
-        for idx in valid_selected:
-            job_id = os_list[idx]
-            op_id = os_list[:idx].count(job_id)
-            ms_idx = self._get_ms_index(job_id, op_id)
-            
-            removed.append({
-                "pos": idx,
-                "job_id": job_id,
-                "op_id": op_id,
-                "ms_idx": ms_idx,
-                "ms_choice": individual["ms"][ms_idx]
-            })
-            del os_list[idx]
         
         # 根据剩余 OS 重建 MS（避免索引错位）
         new_ms = self._rebuild_ms(os_list, individual["ms"])

@@ -146,32 +146,46 @@ class GA:
         # 1. OS 交叉: 使用 POX (precedence operation crossover)
         # 随机划分工件集合为两个子集
         jobs_set = list(range(self.num_jobs))
-        subset1 = set(random.sample(jobs_set, k=random.randint(1, self.num_jobs-1)))
-        subset2 = set(jobs_set) - subset1
-        
-        child1_os = []
-        child2_os = []
-        # 子代1: 保留父代1中属于subset1的工件顺序，保留父代2中属于subset2的工件顺序
-        for gene in parent1["os"]:
-            if gene in subset1:
-                child1_os.append(gene)
-        for gene in parent2["os"]:
-            if gene in subset2:
-                child1_os.append(gene)
-        # 子代2: 保留父代2中属于subset1，父代1中属于subset2
-        for gene in parent2["os"]:
-            if gene in subset1:
-                child2_os.append(gene)
-        for gene in parent1["os"]:
-            if gene in subset2:
-                child2_os.append(gene)
+        # 边界保护：当工件数为1时无法划分子集，直接复制
+        if self.num_jobs <= 1:
+            child1_os = parent1["os"][:]
+            child2_os = parent2["os"][:]
+        else:
+            subset1 = set(random.sample(jobs_set, k=random.randint(1, self.num_jobs-1)))
+            subset2 = set(jobs_set) - subset1
+            
+            child1_os = []
+            child2_os = []
+            # 子代1: 保留父代1中属于subset1的工件顺序，保留父代2中属于subset2的工件顺序
+            for gene in parent1["os"]:
+                if gene in subset1:
+                    child1_os.append(gene)
+            for gene in parent2["os"]:
+                if gene in subset2:
+                    child1_os.append(gene)
+            # 子代2: 保留父代2中属于subset1，父代1中属于subset2
+            for gene in parent2["os"]:
+                if gene in subset1:
+                    child2_os.append(gene)
+            for gene in parent1["os"]:
+                if gene in subset2:
+                    child2_os.append(gene)
         
         # 2. MS 交叉: 两点交叉
         length = len(parent1["ms"])
-        point1 = random.randint(1, length-2)
-        point2 = random.randint(point1, length-1)
-        child1_ms = parent1["ms"][:point1] + parent2["ms"][point1:point2] + parent1["ms"][point2:]
-        child2_ms = parent2["ms"][:point1] + parent1["ms"][point1:point2] + parent2["ms"][point2:]
+        # 边界保护：编码长度过短时无法执行两点交叉，直接交换或复制
+        if length <= 1:
+            child1_ms = parent1["ms"][:]
+            child2_ms = parent2["ms"][:]
+        elif length == 2:
+            # 长度为2时直接交换两个基因
+            child1_ms = [parent2["ms"][0], parent1["ms"][1]]
+            child2_ms = [parent1["ms"][0], parent2["ms"][1]]
+        else:
+            point1 = random.randint(1, length-2)
+            point2 = random.randint(point1, length-1)
+            child1_ms = parent1["ms"][:point1] + parent2["ms"][point1:point2] + parent1["ms"][point2:]
+            child2_ms = parent2["ms"][:point1] + parent1["ms"][point1:point2] + parent2["ms"][point2:]
         
         child1 = {"os": child1_os, "ms": child1_ms}
         child2 = {"os": child2_os, "ms": child2_ms}
@@ -180,7 +194,8 @@ class GA:
     def mutate(self, individual, pm):
         """变异操作：对 OS 和 MS 分别变异"""
         # OS 变异: 交换两个不同的基因
-        if random.random() < pm:
+        # 边界保护：至少需要2个基因才能交换
+        if random.random() < pm and len(individual["os"]) >= 2:
             idx1, idx2 = random.sample(range(len(individual["os"])), 2)
             individual["os"][idx1], individual["os"][idx2] = individual["os"][idx2], individual["os"][idx1]
         

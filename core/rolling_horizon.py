@@ -181,21 +181,29 @@ class RollingHorizon:
     def update_state(self, executed_segment):
         """
         执行当前窗口的前半段调度，更新车间状态
-        executed_segment: 实际执行的工序列表 (job_id, op_id, machine_id, start, end, actual_duration)
+        executed_segment: 实际执行的工序列表 (job_id, local_op_id, machine_id, start, end, actual_duration)
+            注意：op_id 是相对于剩余子问题的局部索引，需要转换为全局索引
         """
-        for (job_id, op_id, machine_id, start, end, actual_duration) in executed_segment:
+        # 关键修复：保存每个工件的原始 job_next_op，用于局部→全局索引转换
+        # 根据项目规范第8条：global_op_id = current_job_next_operation + local_op_id
+        # 必须在循环前快照，避免循环中更新 job_next_op 导致后续转换错误
+        original_next_op = self.job_next_op[:]
+        
+        for (job_id, local_op_id, machine_id, start, end, actual_duration) in executed_segment:
             # 更新机器可用时间
             self.machine_available_time[machine_id] = end
-            # 关键修复：更新工件下一道工序时，取最大值避免回退
-            # 因为GA可能重新调度已执行过的工序，必须保证进度只增不减
-            self.job_next_op[job_id] = max(self.job_next_op[job_id], op_id + 1)
-            # 记录已执行调度
-            self.schedule.append((job_id, op_id, machine_id, start, end))
+            # 将局部索引转换为全局索引
+            global_op_id = original_next_op[job_id] + local_op_id
+            # 更新工件下一道工序时，取最大值避免回退
+            self.job_next_op[job_id] = max(self.job_next_op[job_id], global_op_id + 1)
+            # 记录已执行调度（使用全局 op_id）
+            self.schedule.append((job_id, global_op_id, machine_id, start, end))
             # 更新机器加工计数（用于退化）
             self.machine_process_count[machine_id] += 1
-        # 更新时间
+        # 更新时间：确保 current_time 单调递增，不回退
         if executed_segment:
-            self.current_time = max(end for (_,_,_,_,end,_) in executed_segment)
+            segment_end = max(end for (_,_,_,_,end,_) in executed_segment)
+            self.current_time = max(self.current_time, segment_end)
     
     def plan_horizon(self, horizon_length):
         """
