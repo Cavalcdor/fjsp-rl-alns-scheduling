@@ -268,33 +268,55 @@ class ALNS:
         """
         高负荷机器破坏：找出当前调度中负荷最高的机器，优先移除该机器上的部分工序
         """
-        assignment = self.decode(individual)
-        # 计算每个机器的负荷
+        # 直接基于 individual["os"] 和 individual["ms"] 计算机器负荷，避免解码
         machine_load = [0] * self.num_machines
-        for (job_id, op_id, machine_id, duration) in assignment:
-            machine_load[machine_id] += duration
+        job_op_counter = [0] * self.num_jobs
+        
+        for i, job_id in enumerate(individual["os"]):
+            op_id = job_op_counter[job_id]
+            machine_choice = individual["ms"][i]
+            op_data = self.jobs[job_id][op_id]
+            if machine_choice < len(op_data["machines"]):
+                machine_id = op_data["machines"][machine_choice]
+                duration = op_data["times"][machine_choice]
+                machine_load[machine_id] += duration
+            job_op_counter[job_id] += 1
+        
         # 找出负荷最高的机器
         sorted_machines = sorted(range(self.num_machines), key=lambda m: machine_load[m], reverse=True)
         high_machine = sorted_machines[0]
-        # 找出该机器上的所有工序索引
+        
+        # 找出该机器上的所有工序在 OS 中的索引
         indices_on_machine = []
-        for idx, (job_id, op_id, machine_id, duration) in enumerate(assignment):
-            if machine_id == high_machine:
-                indices_on_machine.append(idx)
+        job_op_counter = [0] * self.num_jobs
+        for i, job_id in enumerate(individual["os"]):
+            op_id = job_op_counter[job_id]
+            machine_choice = individual["ms"][i]
+            op_data = self.jobs[job_id][op_id]
+            if machine_choice < len(op_data["machines"]):
+                machine_id = op_data["machines"][machine_choice]
+                if machine_id == high_machine:
+                    indices_on_machine.append(i)
+            job_op_counter[job_id] += 1
+        
         if len(indices_on_machine) < destroy_size:
             # 如果不够，随机补齐
-            all_indices = list(range(len(assignment)))
+            all_indices = list(range(len(individual["os"])))
             additional = random.sample(all_indices, destroy_size - len(indices_on_machine))
             indices_on_machine.extend(additional)
+        
         selected = random.sample(indices_on_machine, destroy_size)
         selected.sort(reverse=True)
+        
         # 重建个体（移除所选工序）
         os_list = individual["os"][:]
         removed = []
+        
         for idx in selected:
             job_id = os_list[idx]
             op_id = os_list[:idx].count(job_id)
             ms_idx = self._get_ms_index(job_id, op_id)
+            
             removed.append({
                 "pos": idx,
                 "job_id": job_id,
@@ -303,6 +325,7 @@ class ALNS:
                 "ms_choice": individual["ms"][ms_idx]
             })
             del os_list[idx]
+        
         # 根据剩余 OS 重建 MS（避免索引错位）
         new_ms = self._rebuild_ms(os_list, individual["ms"])
         new_individual = {"os": os_list, "ms": new_ms}

@@ -160,14 +160,22 @@ class RollingHorizon:
         获取当前剩余未调度的工序，构成新的 FJSP 子问题
         返回: remaining_jobs 结构（与原始 jobs 格式相同）
         """
-        # 构建剩余工件工序列表
+        # 构建剩余工件工序列表（使用深拷贝避免修改原始数据）
         remaining = []
         for job_id, job in enumerate(self.jobs):
             next_op_idx = self.job_next_op[job_id]
             if next_op_idx >= len(job):
                 remaining.append([])  # 该工件已完成
             else:
-                remaining.append(job[next_op_idx:])  # 保留剩余工序
+                # 使用深拷贝确保不会修改原始jobs数据
+                remaining_job = []
+                for op in job[next_op_idx:]:
+                    # 深拷贝每个工序的字典
+                    remaining_job.append({
+                        "machines": op["machines"][:],  # 浅拷贝列表即可
+                        "times": op["times"][:]
+                    })
+                remaining.append(remaining_job)
         return remaining
     
     def update_state(self, executed_segment):
@@ -178,8 +186,9 @@ class RollingHorizon:
         for (job_id, op_id, machine_id, start, end, actual_duration) in executed_segment:
             # 更新机器可用时间
             self.machine_available_time[machine_id] = end
-            # 更新工件下一道工序
-            self.job_next_op[job_id] = op_id + 1
+            # 关键修复：更新工件下一道工序时，取最大值避免回退
+            # 因为GA可能重新调度已执行过的工序，必须保证进度只增不减
+            self.job_next_op[job_id] = max(self.job_next_op[job_id], op_id + 1)
             # 记录已执行调度
             self.schedule.append((job_id, op_id, machine_id, start, end))
             # 更新机器加工计数（用于退化）
@@ -241,9 +250,21 @@ class RollingHorizon:
         mach_avail = self.machine_available_time[:]
         # 工件上一道工序的完成时间（关键：保证工序先后约束）
         job_avail = [0.0] * len(self.jobs)
-        # 初始化：每个工件的下一道待加工工序的可用时间 = 当前时间
+        
+        # 关键修复：对于已部分执行的工件，其可用时间应为已执行的最后一道工序的结束时间
+        # 而不是简单的 current_time
         for job_id in range(len(self.jobs)):
-            job_avail[job_id] = self.current_time
+            # 查找该工件已执行工序中的最大结束时间
+            completed_end_times = [
+                end for (jid, oid, mid, start, end) in self.schedule 
+                if jid == job_id
+            ]
+            if completed_end_times:
+                # 该工件已有工序执行完毕，可用时间为最后完成的工序结束时间
+                job_avail[job_id] = max(completed_end_times)
+            else:
+                # 该工件尚未开始，可用时间为当前时间
+                job_avail[job_id] = self.current_time
         
         for (job_id, op_id, machine_id, base_duration) in planned_segment:
             # 计算实际加工时间（含退化 + 随机波动）
