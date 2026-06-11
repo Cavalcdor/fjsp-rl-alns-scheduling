@@ -541,8 +541,8 @@ class ALNS:
         # 退火初始温度
         self.temperature = self.T0
         
-        # 每个个体进行固定次数的迭代（可配置）
-        max_iter = 50
+        # 每个个体进行固定次数的迭代（根据问题规模动态调整）
+        max_iter = max(50, self.total_ops * 2)
         for _ in range(max_iter):
             # 选择破坏和修复算子
             d_idx = self.select_operator(self.destroy_weights)

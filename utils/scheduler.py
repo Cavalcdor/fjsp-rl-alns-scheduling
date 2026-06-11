@@ -57,28 +57,6 @@ def evaluate(jobs, assignment, num_machines, return_details=False):
         return cmax, load_variance
 
 
-def decode_chromosome(individual, jobs):
-    """
-    将遗传算法的染色体解码为 assignment 列表
-    
-    参数:
-        individual: 个体，包含两个部分:
-            os: 工序顺序编码 (list of (job_id, op_id) 或 job重复次数编码)
-            ms: 机器选择编码 (list of machine indices)
-        jobs: 工件数据
-    
-    返回:
-        assignment: list of (job_id, op_id, machine_id, duration)
-    """
-    # 这里假设个体编码为 (os, ms)
-    # os: 例如 [0,0,0,1,1,1,...] 表示工件0的三道工序然后工件1的三道工序
-    # 但标准的两段式编码通常是基于工件的重复次数编码
-    # 我们实现一种常见的解码方式：给定工序序列和每个工序选择的机器索引
-    # 为简化，这里先提供一个占位实现，实际需要结合GA编码设计
-    # 具体实现将在GA模块中细化
-    raise NotImplementedError("将在GA模块中实现具体解码")
-
-
 if __name__ == "__main__":
     # 简单测试
     # 构造一个简单的2工件2机器示例

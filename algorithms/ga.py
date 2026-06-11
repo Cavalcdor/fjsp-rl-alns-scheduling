@@ -144,7 +144,14 @@ class GA:
     def crossover(self, parent1, parent2, pc):
         """交叉操作：对 OS 和 MS 分别交叉，返回两个子代"""
         if random.random() > pc:
-            return parent1.copy(), parent2.copy()
+            # 深拷贝：避免子代与父代共享 os/ms 列表引用
+            return {
+                "os": parent1["os"][:],
+                "ms": parent1["ms"][:]
+            }, {
+                "os": parent2["os"][:],
+                "ms": parent2["ms"][:]
+            }
         
         # OS 交叉: POX (precedence operation crossover)
         jobs_set = list(range(self.num_jobs))
@@ -222,28 +229,25 @@ class GA:
         raise IndexError("Invalid ms index")
 
     def _compute_diversity(self):
-        """计算种群多样性（OS海明距离采样）"""
+        """计算种群多样性（基于适应度值的变异系数）"""
         if len(self.population) < 2:
             return 0.0
-        sample_size = min(30, len(self.population))
-        sample_indices = random.sample(range(len(self.population)), sample_size)
-        total_hamming = 0
-        count = 0
-        chrom_len = max(len(self.population[0]["os"]), 1)
-        for i in range(len(sample_indices)):
-            for j in range(i + 1, len(sample_indices)):
-                os_i = self.population[sample_indices[i]]["os"]
-                os_j = self.population[sample_indices[j]]["os"]
-                hamming = sum(1 for a, b in zip(os_i, os_j) if a != b)
-                total_hamming += hamming
-                count += 1
-        avg_hamming = total_hamming / max(count, 1)
-        return avg_hamming / chrom_len
+        cmax_values = [ind["cmax"] for ind in self.population]
+        mean_cmax = np.mean(cmax_values)
+        if mean_cmax < 1e-6:
+            return 0.0
+        std_cmax = np.std(cmax_values)
+        cv = std_cmax / mean_cmax  # 变异系数
+        # 归一化到 0~1 之间（通常 CV 在 0~0.5 之间）
+        return min(cv * 2.0, 1.0)
 
-    def _restart_population(self, keep_best=True):
+    def _restart_population(self, keep_best=True, global_best=None):
         """重启种群：保留最优个体，其余重新初始化"""
         if keep_best:
-            best = min(self.population, key=lambda ind: ind["fitness"])
+            if global_best is not None:
+                best = global_best
+            else:
+                best = min(self.population, key=lambda ind: ind["fitness"])
             new_pop = [{
                 "os": best["os"][:],
                 "ms": best["ms"][:],
@@ -307,6 +311,32 @@ class GA:
         best = min(self.population, key=lambda ind: ind["fitness"])
         return best
     
+    def _adaptive_mutate(self, individual, pm, gen_progress, no_improve_ratio):
+        """
+        自适应变异：根据停滞代数动态调整变异强度
+        no_improve_ratio: 停滞代数 / max_gen，越大说明越需要强变异
+        """
+        # 基础变异
+        self.mutate(individual, pm, gen_progress)
+        # 如果长期停滞，额外增加扰动
+        if no_improve_ratio > 0.15:
+            extra_pm = min(pm * (1.0 + no_improve_ratio * 2), 0.6)
+            os_len = len(individual["os"])
+            if os_len >= 2 and random.random() < extra_pm:
+                num_swaps = random.randint(1, max(2, os_len // 5))
+                for _ in range(num_swaps):
+                    idx1, idx2 = random.sample(range(os_len), 2)
+                    individual["os"][idx1], individual["os"][idx2] = individual["os"][idx2], individual["os"][idx1]
+            # MS 强变异
+            ms_pm = min(extra_pm * 1.5, 0.6)
+            for i in range(len(individual["ms"])):
+                if random.random() < ms_pm:
+                    job_id, op_id = self._get_job_op_from_ms_index(i)
+                    op_data = self.jobs[job_id][op_id]
+                    new_choice = random.randint(0, len(op_data["machines"]) - 1)
+                    individual["ms"][i] = new_choice
+        return individual
+
     def run(self, rl_controller=None, alns=None):
         """
         主循环
@@ -322,10 +352,12 @@ class GA:
         best_individual = min(self.population, key=lambda ind: ind["fitness"])
         best_cmax = best_individual["cmax"]
         no_improve_gen = 0
-        restart_interval = 80
+        restart_interval = 50  # 降低重启间隔
 
         for gen in range(self.max_gen):
             gen_progress = gen / max(self.max_gen, 1)
+            no_improve_ratio = no_improve_gen / max(self.max_gen, 1)
+            
             if rl_controller is not None:
                 old_best_cmax = min(ind["cmax"] for ind in self.population)
                 old_avg_cmax = np.mean([ind["cmax"] for ind in self.population])
@@ -336,7 +368,18 @@ class GA:
                 pc = self.pc_high
                 pm = self.pm_low
 
+            # 执行进化（使用自适应变异）
             self.evolve(pc, pm, gen_progress)
+            # 对种群中部分个体施加额外自适应变异（跳出局部最优）
+            if no_improve_ratio > 0.1:
+                sorted_pop = sorted(self.population, key=lambda ind: ind["fitness"])
+                # 对非精英的后半部分个体施加强变异
+                perturb_count = max(1, len(sorted_pop) // 4)
+                for i in range(perturb_count):
+                    idx = -(i + 1)
+                    self._adaptive_mutate(sorted_pop[idx], pm, gen_progress, no_improve_ratio)
+                    self.evaluate_fitness(sorted_pop[idx])
+                self.population = sorted_pop
 
             current_best = min(self.population, key=lambda ind: ind["fitness"])
             if current_best["cmax"] < best_cmax:
@@ -364,12 +407,14 @@ class GA:
                 next_state = rl_controller.compute_state(self.population)
                 rl_controller.update_q_table(reward, next_state)
 
-            # 多样性监控 + 重启
+            # 多样性监控 + 重启（放宽触发条件）
             if no_improve_gen > 0 and no_improve_gen % restart_interval == 0:
                 diversity = self._compute_diversity()
-                if diversity < 0.15:
-                    self._restart_population(keep_best=True)
+                if diversity < 0.15 or no_improve_gen >= restart_interval * 2:
+                    self._restart_population(keep_best=True, global_best=best_individual)
                     no_improve_gen = 0
+                    if self.verbose:
+                        print(f"  [重启] Gen {gen+1}: 种群重启，保留全局最优 Cmax={best_individual['cmax']}")
 
             if self.verbose and (gen + 1) % 10 == 0:
                 avg_cmax = np.mean([ind["cmax"] for ind in self.population])
