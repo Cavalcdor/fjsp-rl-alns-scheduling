@@ -120,6 +120,10 @@ def main():
     if instance_arg is None:
         instance_arg = config.DEFAULT_INSTANCE
 
+    # 自动补全 .fjs 扩展名
+    if instance_arg.upper().startswith("MK") and not instance_arg.upper().endswith(".FJS"):
+        instance_arg += ".fjs"
+
     path = get_instance_path(instance_arg)
     print("\n数据集: %s" % path)
     if not os.path.exists(path):
