@@ -140,10 +140,16 @@ class ALNS:
         assignment = self.decode(individual)
         # 复用 scheduler 的 evaluate 函数
         from utils.scheduler import evaluate
-        cmax, load_var = evaluate(self.jobs, assignment, self.num_machines, return_details=False)
+        cmax, load_var, details = evaluate(self.jobs, assignment, self.num_machines, return_details=True)
         individual["cmax"] = cmax
         individual["load_var"] = load_var
-        individual["fitness"] = cmax + 0.1 * load_var
+        # 与 GA 的适应度保持一致
+        machine_load = details['machine_load']
+        max_load = max(machine_load)
+        load_penalty = 0.15 * load_var
+        if max_load > cmax * 0.85:
+            load_penalty += 0.1 * (max_load - cmax * 0.85)
+        individual["fitness"] = cmax + load_penalty
         return cmax, load_var
     
     def destroy_random(self, individual, destroy_size):
@@ -428,7 +434,8 @@ class ALNS:
         """
         负荷均衡修复：优先将工序分配给当前负荷最小的机器
         
-        与贪心修复不同，该算子会重新选择机器，以平衡各机器负荷
+        与贪心修复不同，该算子会重新选择机器，以平衡各机器负荷。
+        增强版：不仅考虑当前负荷，还考虑机器利用率，并主动将工序从高负荷机器分流。
         """
         new_individual = copy.deepcopy(individual)
         
@@ -458,15 +465,27 @@ class ALNS:
             available_machines = op_data["machines"]
             available_times = op_data["times"]
             
-            # 选择当前负荷最小的可选机器
+            # 多目标选择：综合考虑负荷均衡和加工时间
+            # 对每个可选机器计算评分，得分越低越好
             best_machine_idx = 0
-            min_load = float('inf')
+            best_score = float('inf')
+            
+            # 当前最大机器负荷（用于归一化）
+            max_current_load = max(machine_current_load) if max(machine_current_load) > 0 else 1
             
             for i, machine_id in enumerate(available_machines):
-                # 考虑机器当前负荷 + 该工序在该机器上的加工时间
-                effective_load = machine_current_load[machine_id] + available_times[i]
-                if effective_load < min_load:
-                    min_load = effective_load
+                # 该工序后的预计负荷
+                new_load = machine_current_load[machine_id] + available_times[i]
+                # 负荷均衡因子：该机器新负荷与当前最大负荷的比值
+                load_factor = new_load / max_current_load
+                # 时间因子：该工序加工时间与最短加工时间的比值
+                min_time = min(available_times)
+                time_factor = available_times[i] / min_time if min_time > 0 else 1
+                # 综合评分：40% 负荷均衡 + 60% 加工时间（优先保证短加工时间以降低Cmax）
+                score = 0.4 * load_factor + 0.6 * time_factor
+                
+                if score < best_score:
+                    best_score = score
                     best_machine_idx = i
             
             # 更新机器负荷

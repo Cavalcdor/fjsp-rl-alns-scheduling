@@ -53,9 +53,9 @@ class GA:
         return random.choice(candidates)
 
     def initialize_population(self):
-        """初始化种群：混合策略——部分贪心+部分混沌"""
+        """初始化种群：混合策略——部分贪心+部分混沌+部分负载均衡"""
         population = []
-        # 策略分配：30%纯贪心, 30%纯混沌, 40%混沌OS+贪心MS
+        # 策略分配：25%纯贪心, 25%纯混沌, 25%负载均衡, 25%混合
         for i in range(self.pop_size):
             # OS 编码: 混沌排列
             os_base = []
@@ -65,12 +65,12 @@ class GA:
             os = [x for _, x in sorted(zip(chaotic_os, os_base), key=lambda pair: pair[0])]
 
             ms = []
-            if i < self.pop_size * 0.3:
+            if i < self.pop_size * 0.25:
                 # 策略1: 纯贪心 MS（全部选最短加工时间）
                 for job_id, job in enumerate(self.jobs):
                     for op_id in range(len(job)):
                         ms.append(self._greedy_ms(job_id, op_id))
-            elif i < self.pop_size * 0.6:
+            elif i < self.pop_size * 0.50:
                 # 策略2: 纯混沌 MS
                 chaotic_ms = self._chaotic_sequence(self.total_ops, x0=random.random() * 0.8 + 0.1)
                 idx = 0
@@ -79,14 +79,42 @@ class GA:
                         choice = int(chaotic_ms[idx] * len(op["machines"])) % len(op["machines"])
                         ms.append(choice)
                         idx += 1
-            else:
-                # 策略3: 混合——70%概率贪心, 30%概率随机
+            elif i < self.pop_size * 0.75:
+                # 策略3: 负载均衡 MS——选择当前累计负荷最小的机器
+                machine_load = [0] * self.num_machines
                 for job_id, job in enumerate(self.jobs):
                     for op_id in range(len(job)):
-                        if random.random() < 0.7:
+                        op = job[op_id]
+                        min_load = float('inf')
+                        best_choice = 0
+                        for ci, machine_id in enumerate(op["machines"]):
+                            effective_load = machine_load[machine_id] + op["times"][ci]
+                            if effective_load < min_load:
+                                min_load = effective_load
+                                best_choice = ci
+                        ms.append(best_choice)
+                        machine_load[op["machines"][best_choice]] += op["times"][best_choice]
+            else:
+                # 策略4: 混合——50%概率贪心, 30%概率负载均衡, 20%概率随机
+                machine_load = [0] * self.num_machines
+                for job_id, job in enumerate(self.jobs):
+                    for op_id in range(len(job)):
+                        op = job[op_id]
+                        r = random.random()
+                        if r < 0.5:
                             ms.append(self._greedy_ms(job_id, op_id))
+                        elif r < 0.8:
+                            # 负载均衡选择
+                            min_load = float('inf')
+                            best_choice = 0
+                            for ci, machine_id in enumerate(op["machines"]):
+                                effective_load = machine_load[machine_id] + op["times"][ci]
+                                if effective_load < min_load:
+                                    min_load = effective_load
+                                    best_choice = ci
+                            ms.append(best_choice)
+                            machine_load[op["machines"][best_choice]] += op["times"][best_choice]
                         else:
-                            op = job[op_id]
                             ms.append(random.randint(0, len(op["machines"]) - 1))
 
             population.append({"os": os, "ms": ms, "fitness": None, "cmax": None, "load_var": None})
@@ -127,12 +155,19 @@ class GA:
     
     def evaluate_fitness(self, individual):
         assignment = self.decode(individual)
-        cmax, load_var = evaluate(self.jobs, assignment, self.num_machines, return_details=False)
+        cmax, load_var, details = evaluate(self.jobs, assignment, self.num_machines, return_details=True)
         individual["cmax"] = cmax
         individual["load_var"] = load_var
-        # 适应度使用加权和：主目标 Cmax，辅以负荷方差（归一化权重0.1）
-        # 这样在锦标赛选择时能同时考虑两个目标，避免只盯着Cmax导致负荷失衡
-        individual["fitness"] = cmax + 0.1 * load_var
+        # 适应度使用加权和：主目标 Cmax，辅以负荷方差
+        # 负荷方差权重 0.15，在鼓励负载均衡的同时不压制 Cmax 优化
+        # 注意：Cmax 是首要目标，负载均衡是次要目标
+        machine_load = details['machine_load']
+        max_load = max(machine_load)
+        # 只有当 max_load 明显高于 cmax 时才惩罚（说明有机器成为瓶颈）
+        load_penalty = 0.15 * load_var
+        if max_load > cmax * 0.85:
+            load_penalty += 0.1 * (max_load - cmax * 0.85)
+        individual["fitness"] = cmax + load_penalty
         return cmax, load_var
     
     def selection_tournament(self, population):
@@ -197,7 +232,7 @@ class GA:
         return child1, child2
     
     def mutate(self, individual, pm, gen_progress=0.0):
-        """变异操作：OS 交换 + MS 随机重选"""
+        """变异操作：OS 交换 + MS 随机重选（含负载均衡导向）"""
         os_len = len(individual["os"])
         if os_len >= 2 and random.random() < pm:
             num_swaps = random.randint(1, max(1, os_len // 10))
@@ -206,11 +241,35 @@ class GA:
                 individual["os"][idx1], individual["os"][idx2] = individual["os"][idx2], individual["os"][idx1]
         # MS 变异率略高于 pm，维持探索能力
         ms_pm = min(pm * 1.5, 0.5)
+        # 先计算机器当前负荷（用于负载均衡导向的变异）
+        machine_load = [0] * self.num_machines
+        job_op_counter = [0] * self.num_jobs
+        for i, job_id in enumerate(individual["os"]):
+            op_id = job_op_counter[job_id]
+            machine_choice = individual["ms"][i]
+            op_data = self.jobs[job_id][op_id]
+            if machine_choice < len(op_data["machines"]):
+                machine_id = op_data["machines"][machine_choice]
+                duration = op_data["times"][machine_choice]
+                machine_load[machine_id] += duration
+            job_op_counter[job_id] += 1
+        
         for i in range(len(individual["ms"])):
             if random.random() < ms_pm:
                 job_id, op_id = self._get_job_op_from_ms_index(i)
                 op_data = self.jobs[job_id][op_id]
-                new_choice = random.randint(0, len(op_data["machines"]) - 1)
+                # 负载均衡导向：以 50% 概率选择当前负荷最小的可选机器
+                if random.random() < 0.5:
+                    min_load = float('inf')
+                    best_choice = 0
+                    for ci, machine_id in enumerate(op_data["machines"]):
+                        effective_load = machine_load[machine_id] + op_data["times"][ci]
+                        if effective_load < min_load:
+                            min_load = effective_load
+                            best_choice = ci
+                    new_choice = best_choice
+                else:
+                    new_choice = random.randint(0, len(op_data["machines"]) - 1)
                 individual["ms"][i] = new_choice
         return individual
     
