@@ -22,6 +22,7 @@ from utils.visualization import plot_schedule_analysis
 from algorithms.ga import GA
 from algorithms.rl_agent import RLController
 from algorithms.alns import ALNS
+from algorithms.tabu_search import TabuSearch
 from core.rolling_horizon import RollingHorizon
 import config
 
@@ -59,7 +60,8 @@ def run_all_static():
         config.VERBOSE = False
         ga = GA(jobs, nm, config)
         best = ga.run(rl_controller=RLController(config),
-                      alns=ALNS(jobs, nm, config))
+                      alns=ALNS(jobs, nm, config),
+                      tabu_search=TabuSearch(jobs, nm, config))
         config.VERBOSE = old_v
 
         assign = ga.decode(best)
@@ -158,10 +160,11 @@ def main():
                 pass
 
     else:
-        print("\n=== 静态 GA 模式 ===")
+        print("\n=== 静态 GA 模式 (GA + ALNS + Tabu Search) ===")
         ga = GA(jobs, nm, config)
         best = ga.run(rl_controller=RLController(config),
-                      alns=ALNS(jobs, nm, config))
+                      alns=ALNS(jobs, nm, config),
+                      tabu_search=TabuSearch(jobs, nm, config))
         print("\nGA 最优 Cmax: %.2f, 负荷方差: %.2f" % (best["cmax"], best["load_var"]))
 
         assign = ga.decode(best)

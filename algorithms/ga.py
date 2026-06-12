@@ -287,6 +287,134 @@ class GA:
                 return job_id, op_id
         raise IndexError("Invalid ms index")
 
+    def _find_critical_path(self, individual):
+        """
+        找出个体的关键路径工序
+        返回: list of dict, 每个元素包含 job_id, op_id, machine_id, start, end, duration
+        关键路径 = 决定 makespan 的最长路径
+        """
+        machine_available = [0] * self.num_machines
+        job_completion = [0] * self.num_jobs
+        op_schedule = []
+        
+        job_op_counter = [0] * self.num_jobs
+        for i, job_id in enumerate(individual["os"]):
+            op_id = job_op_counter[job_id]
+            machine_choice = individual["ms"][i]
+            op_data = self.jobs[job_id][op_id]
+            
+            num_available = len(op_data["machines"])
+            machine_choice = machine_choice % num_available
+            machine_id = op_data["machines"][machine_choice]
+            duration = op_data["times"][machine_choice]
+            
+            start = max(machine_available[machine_id], job_completion[job_id])
+            end = start + duration
+            
+            op_schedule.append({
+                "os_idx": i,
+                "job_id": job_id,
+                "op_id": op_id,
+                "machine_id": machine_id,
+                "machine_choice": machine_choice,
+                "start": start,
+                "end": end,
+                "duration": duration
+            })
+            machine_available[machine_id] = end
+            job_completion[job_id] = end
+            job_op_counter[job_id] += 1
+        
+        makespan = max(job_completion)
+        
+        # 反向追踪关键路径：从结束时间 == makespan 的工序开始
+        critical_ops = []
+        # 先找出所有结束时间等于 makespan 的工序
+        end_candidates = [op for op in op_schedule if abs(op["end"] - makespan) < 1e-6]
+        if not end_candidates:
+            return op_schedule  # 如果没有明确的，返回全部
+        
+        visited = set()
+        from collections import deque
+        queue = deque(end_candidates)
+        
+        while queue:
+            op = queue.popleft()
+            if op["os_idx"] in visited:
+                continue
+            visited.add(op["os_idx"])
+            critical_ops.append(op)
+            
+            # 找前驱工序：
+            # 1. 同一机器上紧邻的前一道工序
+            for other in op_schedule:
+                if other["machine_id"] == op["machine_id"] and other["end"] <= op["start"] + 1e-6:
+                    if other["os_idx"] not in visited:
+                        # 找结束时间最接近当前工序开始的那个
+                        if abs(other["end"] - op["start"]) < 1e-6 or (other["end"] <= op["start"] and other not in queue):
+                            queue.append(other)
+            
+            # 2. 同一工件的前一道工序
+            for other in op_schedule:
+                if other["job_id"] == op["job_id"] and other["op_id"] == op["op_id"] - 1:
+                    if other["os_idx"] not in visited:
+                        queue.append(other)
+        
+        return critical_ops if critical_ops else op_schedule[:max(1, len(op_schedule)//3)]
+
+    def local_search_ms(self, individual):
+        """
+        轻量级局部搜索：对关键路径上的工序，尝试所有可选机器
+        只修改 MS（机器选择），不修改 OS（工序顺序）
+        这是参考 HA_FJSP 的 TS1 思想，但简化版（无禁忌表）
+        返回: 改进后的个体（原地修改）
+        """
+        # 确保个体已评估
+        if individual.get("cmax") is None:
+            self.evaluate_fitness(individual)
+        
+        # 找出关键路径
+        critical_ops = self._find_critical_path(individual)
+        
+        # 对关键路径上的每道工序，尝试换机器
+        improved = False
+        for op_info in critical_ops:
+            job_id = op_info["job_id"]
+            op_id = op_info["op_id"]
+            op_data = self.jobs[job_id][op_id]
+            
+            if len(op_data["machines"]) <= 1:
+                continue  # 只有一台可选机器，跳过
+            
+            # 获取当前 MS 索引
+            ms_idx = self._get_ms_index(job_id, op_id)
+            old_choice = individual["ms"][ms_idx]
+            
+            # 尝试所有其他可选机器
+            best_choice = old_choice
+            best_cmax = individual["cmax"]
+            
+            for alt_idx in range(len(op_data["machines"])):
+                if alt_idx == old_choice:
+                    continue
+                # 临时修改 MS
+                individual["ms"][ms_idx] = alt_idx
+                # 快速评估
+                new_cmax, _, _ = evaluate(self.jobs, self.decode(individual), self.num_machines, return_details=True)
+                if new_cmax < best_cmax:
+                    best_cmax = new_cmax
+                    best_choice = alt_idx
+                    improved = True
+            
+            # 恢复或更新
+            individual["ms"][ms_idx] = best_choice
+        
+        if improved:
+            # 重新完整评估
+            self.evaluate_fitness(individual)
+        
+        return individual
+
     def _compute_diversity(self):
         """计算种群多样性（基于适应度值的变异系数）"""
         if len(self.population) < 2:
@@ -326,8 +454,11 @@ class GA:
         if self.verbose and best is not None:
             print(f"  [重启] 种群已重启，保留最优 Cmax={best['cmax']}")
 
-    def evolve(self, pc, pm, gen_progress=0.0):
-        """执行一代进化，返回新一代种群"""
+    def evolve(self, pc, pm, gen_progress=0.0, ls_prob=0.3):
+        """
+        执行一代进化，返回新一代种群
+        ls_prob: 每个子代执行局部搜索的概率（阶段一改进）
+        """
         new_pop = []
         sorted_pop = sorted(self.population, key=lambda ind: ind["fitness"])
         elites = sorted_pop[:self.elite_count]
@@ -338,8 +469,18 @@ class GA:
             child1, child2 = self.crossover(parent1, parent2, pc)
             child1 = self.mutate(child1, pm, gen_progress)
             child2 = self.mutate(child2, pm, gen_progress)
-            self.evaluate_fitness(child1)
-            self.evaluate_fitness(child2)
+            
+            # 阶段一改进：以概率 ls_prob 对子代执行轻量级局部搜索
+            if random.random() < ls_prob:
+                child1 = self.local_search_ms(child1)
+            else:
+                self.evaluate_fitness(child1)
+            
+            if random.random() < ls_prob:
+                child2 = self.local_search_ms(child2)
+            else:
+                self.evaluate_fitness(child2)
+            
             new_pop.append(child1)
             new_pop.append(child2)
         new_pop = new_pop[:self.pop_size - self.elite_count]
@@ -396,11 +537,12 @@ class GA:
                     individual["ms"][i] = new_choice
         return individual
 
-    def run(self, rl_controller=None, alns=None):
+    def run(self, rl_controller=None, alns=None, tabu_search=None):
         """
         主循环
         rl_controller: 可选的 RL 控制器，提供 get_actions 方法
         alns: 可选的 ALNS 优化器，用于优化精英个体
+        tabu_search: 可选的 TabuSearch 优化器，用于深度局部搜索
         """
         # 初始化种群
         self.population = self.initialize_population()
@@ -411,7 +553,10 @@ class GA:
         best_individual = min(self.population, key=lambda ind: ind["fitness"])
         best_cmax = best_individual["cmax"]
         no_improve_gen = 0
-        restart_interval = 50  # 降低重启间隔
+        restart_interval = 50
+
+        # 阶段一改进：动态调整局部搜索概率
+        base_ls_prob = 0.3
 
         for gen in range(self.max_gen):
             gen_progress = gen / max(self.max_gen, 1)
@@ -427,12 +572,17 @@ class GA:
                 pc = self.pc_high
                 pm = self.pm_low
 
-            # 执行进化（使用自适应变异）
-            self.evolve(pc, pm, gen_progress)
+            # 阶段一改进：停滞时提高局部搜索概率
+            ls_prob = base_ls_prob
+            if no_improve_ratio > 0.1:
+                ls_prob = min(base_ls_prob + no_improve_ratio * 0.5, 0.8)
+
+            # 执行进化（集成局部搜索）
+            self.evolve(pc, pm, gen_progress, ls_prob=ls_prob)
+            
             # 对种群中部分个体施加额外自适应变异（跳出局部最优）
             if no_improve_ratio > 0.1:
                 sorted_pop = sorted(self.population, key=lambda ind: ind["fitness"])
-                # 对非精英的后半部分个体施加强变异
                 perturb_count = max(1, len(sorted_pop) // 4)
                 for i in range(perturb_count):
                     idx = -(i + 1)
@@ -448,16 +598,41 @@ class GA:
             else:
                 no_improve_gen += 1
 
-            # ALNS 每10代执行一次
-            if alns is not None and (gen + 1) % 10 == 0:
+            # 阶段二改进：Tabu Search + ALNS 协同优化
+            # 每5代对精英个体执行深度局部搜索
+            if (gen + 1) % 5 == 0:
                 sorted_pop = sorted(self.population, key=lambda ind: ind["fitness"])
                 elites = sorted_pop[:self.elite_count]
                 non_elites = sorted_pop[self.elite_count:]
+
                 for i in range(len(elites)):
-                    improved = alns.optimize(elites[i], self)
-                    if improved["cmax"] < elites[i]["cmax"]:
-                        elites[i] = improved
+                    # ALNS 优化
+                    if alns is not None:
+                        improved = alns.optimize(elites[i], self)
+                        if improved["cmax"] < elites[i]["cmax"]:
+                            elites[i] = improved
+                    # Tabu Search 深度优化（每10代执行一次，计算量较大）
+                    if tabu_search is not None and (gen + 1) % 10 == 0:
+                        ts_improved = tabu_search.optimize(elites[i])
+                        if ts_improved["cmax"] < elites[i]["cmax"]:
+                            elites[i] = ts_improved
+
                 self.population = elites + non_elites
+
+            # 阶段二改进：初始最优解也执行一次 Tabu Search
+            if tabu_search is not None and gen == 0:
+                ts_best = tabu_search.optimize(best_individual)
+                if ts_best["cmax"] < best_individual["cmax"]:
+                    best_individual = ts_best
+                    best_cmax = best_individual["cmax"]
+                    # 将改进后的个体放回种群
+                    self.population[-1] = {
+                        "os": best_individual["os"][:],
+                        "ms": best_individual["ms"][:],
+                        "cmax": best_individual["cmax"],
+                        "load_var": best_individual["load_var"],
+                        "fitness": best_individual["fitness"]
+                    }
 
             if rl_controller is not None:
                 new_best_cmax = min(ind["cmax"] for ind in self.population)
@@ -466,7 +641,7 @@ class GA:
                 next_state = rl_controller.compute_state(self.population)
                 rl_controller.update_q_table(reward, next_state)
 
-            # 多样性监控 + 重启（放宽触发条件）
+            # 阶段一改进：更积极的停滞检测 + 重启
             if no_improve_gen > 0 and no_improve_gen % restart_interval == 0:
                 diversity = self._compute_diversity()
                 if diversity < 0.15 or no_improve_gen >= restart_interval * 2:
@@ -479,5 +654,12 @@ class GA:
                 avg_cmax = np.mean([ind["cmax"] for ind in self.population])
                 diversity = self._compute_diversity()
                 print(f"Gen {gen+1}: best cmax={best_cmax}, avg cmax={avg_cmax:.2f}, diversity={diversity:.3f}")
+
+        # 最终：对最优个体执行一次深度 Tabu Search
+        if tabu_search is not None:
+            final_best = tabu_search.optimize(best_individual)
+            if final_best["cmax"] < best_individual["cmax"]:
+                best_individual = final_best
+                best_cmax = best_individual["cmax"]
 
         return best_individual
