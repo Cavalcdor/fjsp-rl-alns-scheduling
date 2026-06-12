@@ -8,6 +8,7 @@
   python main.py all                        跑所有 Mk01-Mk10
   python main.py rolling_horizon            滚动时域模式 (默认 Mk01)
   python main.py static_ga Mk05             静态模式跑 Mk05
+  python main.py Mk07 --trials 6            用6个进程并行跑6次独立GA取最优
 """
 
 import sys
@@ -27,6 +28,37 @@ from core.rolling_horizon import RollingHorizon
 import config
 
 
+# ============================================================
+
+# Brandimarte Mk 系列最优已知解 (BKS)
+BKS_TABLE = {
+    "Mk01.fjs": 40, "Mk02.fjs": 26, "Mk03.fjs": 204,
+    "Mk04.fjs": 60, "Mk05.fjs": 170, "Mk06.fjs": 52,
+    "Mk07.fjs": 214, "Mk08.fjs": 523, "Mk09.fjs": 299,
+    "Mk10.fjs": 165
+}
+
+
+def bks(name):
+    return BKS_TABLE.get(name, "-")
+
+
+def gap_str(ga_cmax, bks_val):
+    if bks_val == "-":
+        return "  N/A"
+    diff = ga_cmax - bks_val
+    if diff == 0:
+        return "  ✅ 0%"
+    elif diff < 0:
+        return "  🔥 %+.1f%%" % (diff / bks_val * 100)
+    else:
+        return "  %+.1f%%" % (diff / bks_val * 100)
+
+
+def fmt_sep(n, ch="─"):
+    return ch * n
+
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -39,13 +71,16 @@ def get_instance_path(name=None):
 
 
 def run_all_static():
-    """跑全部 Mk01-Mk10"""
-    print("=" * 75)
-    print("Brandimarte Mk 系列批量测试（静态 GA）")
-    print("=" * 75)
-    print(" %-8s %4s %4s %5s %8s %9s %8s" % (
-        "实例", "工件", "机器", "工序", "GA_Cmax", "实际Cmax", "负荷方差"))
-    print("-" * 75)
+    """跑全部 Mk01-Mk10，输出带 BKS 对比的格式化表格"""
+    header = "  %-8s %5s %5s %5s %8s %8s %8s %10s %6s" % (
+        "算例", "工件", "机器", "工序", "GA_Cmax", "BKS", "差距", "负荷方差", "耗时")
+    sep = "  " + fmt_sep(len(header) - 2)
+
+    print(f"\n{'=' * (len(header) + 2)}")
+    print("  Brandimarte Mk 系列批量测试（静态 GA）")
+    print(f"{'=' * (len(header) + 2)}")
+    print(header)
+    print(sep)
 
     results = []
     t0 = time.time()
@@ -58,10 +93,14 @@ def run_all_static():
 
         old_v = config.VERBOSE
         config.VERBOSE = False
+
+        t_start = time.time()
         ga = GA(jobs, nm, config)
         best = ga.run(rl_controller=RLController(config),
                       alns=ALNS(jobs, nm, config),
                       tabu_search=TabuSearch(jobs, nm, config))
+
+        t_inst = time.time() - t_start
         config.VERBOSE = old_v
 
         assign = ga.decode(best)
@@ -75,22 +114,30 @@ def run_all_static():
             jt[jid] = e
             ml[mid] += dur
 
-        ac = max(jt)
+        ac = int(max(jt))
         lv = np.var(ml)
         total_ops = sum(len(j) for j in jobs)
-        results.append((name, nj, nm, total_ops, best["cmax"], ac, lv))
-        print(" %-8s %4d %4d %5d %8d %9.0f %8.1f" % (
-            name, nj, nm, total_ops, best["cmax"], ac, lv))
 
-    print("-" * 75)
-    # 汇总表
-    if results:
-        print("\n%-8s %8s %8s %8s" % ("实例", "GA_Cmax", "实际Cmax", "负荷方差"))
-        print("-" * 36)
-        for r in results:
-            print("%-8s %8d %8.0f %8.1f" % (r[0], r[4], r[5], r[6]))
-        print("-" * 36)
-    print("总耗时: %.1fs" % (time.time() - t0))
+        _bks = bks(name)
+        _gap = gap_str(ac, _bks)
+        results.append((name, nj, nm, total_ops, ac, _bks, _gap, lv, t_inst))
+
+        print("  %-8s %5d %5d %5d %8d %8s %10s %8.1f %5.0fs" % (
+            name.replace(".fjs", ""), nj, nm, total_ops, ac, _bks, _gap, lv, t_inst))
+
+    print(sep)
+    # 汇总对比表
+    bks_vals = [r[5] for r in results]
+    our_vals = [r[4] for r in results]
+    gaps = [(o - b if isinstance(b, int) else 0) for o, b in zip(our_vals, bks_vals)]
+    pos_gaps = [g for g in gaps if g > 0]
+    avg_gap = sum(pos_gaps) / len(pos_gaps) if pos_gaps else 0.0
+    reached = sum(1 for o, b in zip(our_vals, bks_vals) if isinstance(b, int) and o <= b)
+
+    print(f"\n  📊 汇总: {reached}/10 达到/超越 BKS | "
+          f"平均正偏差: {avg_gap:+.1f} | "
+          f"总耗时: {time.time() - t0:.0f}s")
+    print()
 
 
 def main():
@@ -143,7 +190,18 @@ def main():
                             RLController(config),
                             ALNS(jobs, nm, config))
         final = rh.run()
-        print("\n最终完工时间: %.2f" % rh.current_time)
+        cmax_rh = rh.current_time
+
+        # 与 BKS 对比（仅参考，滚动时域含扰动）
+        _bks = bks(instance_arg)
+        _gap = gap_str(int(cmax_rh), _bks)
+        print("\n" + "─" * 50)
+        print("  滚动时域 vs 静态最优已知解 (BKS，仅供参考)")
+        print("  " + "─" * 46)
+        print("  %-16s %12s %8s %8s" % ("算例", "RH_Cmax", "BKS", "差距"))
+        print("  " + "─" * 46)
+        print("  %-16s %12.0f %8s %10s" % (instance_arg.replace(".fjs", ""), cmax_rh, _bks, _gap))
+        print("  " + "─" * 46 + "\n")
 
         if final:
             std = [(j, o, m, s, e) for (j, o, m, s, e) in final]
@@ -160,12 +218,25 @@ def main():
                 pass
 
     else:
-        print("\n=== 静态 GA 模式 (GA + ALNS + Tabu Search) ===")
+        print(f"\n=== 静态 GA 模式 (GA + ALNS + Tabu Search) ===")
         ga = GA(jobs, nm, config)
         best = ga.run(rl_controller=RLController(config),
                       alns=ALNS(jobs, nm, config),
                       tabu_search=TabuSearch(jobs, nm, config))
-        print("\nGA 最优 Cmax: %.2f, 负荷方差: %.2f" % (best["cmax"], best["load_var"]))
+
+        # 显示与 BKS 的对比
+        _bks = bks(instance_arg)
+        _our = int(best["cmax"])
+        _gap = gap_str(_our, _bks)
+        print("\n" + "─" * 50)
+        print("  算法结果 vs 最优已知解 (BKS)")
+        print("  " + "─" * 46)
+        print("  %-16s %8s %8s %8s" % ("算例", "GA_Cmax", "BKS", "差距"))
+        print("  " + "─" * 46)
+        print("  %-16s %8d %8s %10s" % (instance_arg.replace(".fjs", ""), _our, _bks, _gap))
+        print("  " + "─" * 46)
+        print(f"  负荷方差: {best['load_var']:.2f}")
+        print()
 
         assign = ga.decode(best)
         mt = [0] * nm

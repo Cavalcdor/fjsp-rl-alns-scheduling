@@ -33,9 +33,12 @@ class TabuSearch:
         self.total_ops = sum(self.ops_per_job)
 
         # 参数
-        self.ts_iterations = getattr(config, 'TS_ITERATIONS', 50)
+        self.ts_iterations = getattr(config, 'TS_ITERATIONS', 80)
         self.tabu_tenure = getattr(config, 'TABU_TENURE', 15)
         self.verbose = getattr(config, 'VERBOSE', False)
+        # 动态迭代：记录当前 gen，用于调整 TS 强度
+        self.current_gen = 0
+        self.max_gen = getattr(config, 'MAX_GEN', 800)
 
         # 预计算 MS 起始索引
         self._ms_start_idx = []
@@ -92,7 +95,8 @@ class TabuSearch:
         job_op_counter = [0] * self.num_jobs
         for i, job_id in enumerate(individual["os"]):
             op_id = job_op_counter[job_id]
-            machine_choice = individual["ms"][i]
+            ms_index = self._get_ms_index(job_id, op_id)
+            machine_choice = individual["ms"][ms_index]
             op_data = self.jobs[job_id][op_id]
 
             num_available = len(op_data["machines"])
@@ -122,8 +126,11 @@ class TabuSearch:
 
     def _find_critical_path(self, individual):
         """
-        找出关键路径工序
-        返回: list of dict, 按时间顺序排列的关键路径工序
+        找出关键路径工序（参考 HA_FJSP 的反向追踪方法）
+        从 makespan 终点开始，递归追踪前驱工序：
+          1. 机器前驱：同一机器上结束时间 == 当前开始时间的工序
+          2. 工序前驱：同一工件的前一道工序
+        返回: list of dict, 按时间正序排列的关键路径工序
         """
         op_schedule, _, _, makespan = self._build_schedule(individual)
 
@@ -132,33 +139,32 @@ class TabuSearch:
         if not end_candidates:
             return []
 
-        visited = set()
-        critical_ops = []
-        from collections import deque
-        queue = deque(end_candidates)
+        # 使用递归方式追踪（类似 HA_FJSP 的 findCriticalPath）
+        def trace_back(op, visited_set):
+            """递归追踪前驱工序"""
+            if op["os_idx"] in visited_set:
+                return
+            visited_set.add(op["os_idx"])
 
-        while queue:
-            op = queue.popleft()
-            if op["os_idx"] in visited:
-                continue
-            visited.add(op["os_idx"])
-            critical_ops.append(op)
-
-            # 前驱工序：
-            # 1. 同一机器上紧邻的前一道工序（结束时间 == 当前开始时间）
+            # 1. 找机器前驱：同一机器上结束时间 == 当前开始时间的工序
+            #    如果有间隙（end < start），则没有机器前驱
             for other in op_schedule:
-                if other["machine_id"] == op["machine_id"] and abs(other["end"] - op["start"]) < 1e-6:
-                    if other["os_idx"] not in visited:
-                        queue.append(other)
+                if (other["machine_id"] == op["machine_id"]
+                        and abs(other["end"] - op["start"]) < 1e-6):
+                    trace_back(other, visited_set)
 
-            # 2. 同一工件的前一道工序
+            # 2. 找工序前驱：同一工件的前一道工序
             for other in op_schedule:
                 if other["job_id"] == op["job_id"] and other["op_id"] == op["op_id"] - 1:
-                    if other["os_idx"] not in visited:
-                        queue.append(other)
+                    trace_back(other, visited_set)
+
+        visited = set()
+        for end_op in end_candidates:
+            trace_back(end_op, visited)
 
         # 按时间正序排列
-        critical_ops.reverse()
+        critical_ops = [op for op in op_schedule if op["os_idx"] in visited]
+        critical_ops.sort(key=lambda x: x["start"])
         return critical_ops
 
     def _evaluate_individual(self, individual):
@@ -192,7 +198,7 @@ class TabuSearch:
                 continue
 
             ms_idx = self._get_ms_index(job_id, op_id)
-            old_choice = individual["ms"][ms_idx]
+            old_choice = individual["ms"][ms_idx] % len(op_data["machines"])
 
             for alt_idx in range(len(op_data["machines"])):
                 if alt_idx == old_choice:
@@ -216,11 +222,13 @@ class TabuSearch:
 
     def _neighborhood_ts2(self, individual, critical_ops):
         """
-        TS2 邻域：对关键路径上的工序，尝试与同机器上的前后工序交换 OS 位置
-        这相当于改变工序在同一机器上的加工顺序
+        TS2 邻域：对关键路径上的工序，尝试与同机器上的相邻工序交换 OS 位置
+        参考 HA_FJSP 的关键块交换思想：
+        - 只交换不同工件的工序（同一工件内交换会破坏工序顺序）
+        - 只交换 OS 编码中相邻位置的工序（确保局部性）
+        - 交换后检查 OS 可行性
 
-        具体操作：在 OS 编码中找到关键路径工序的位置，尝试与同机器上
-        相邻工序交换 OS 位置（保持 MS 不变）
+        返回: list of (neighbor, ("swap", idx1, idx2), cmax)
         """
         neighbors = []
 
@@ -243,36 +251,57 @@ class TabuSearch:
             })
             job_op_counter[job_id] += 1
 
+        # 构建机器 -> OS 位置列表的映射（按 OS 顺序）
+        machine_os_indices = {}
+        for info in os_info:
+            mid = info["machine_id"]
+            if mid not in machine_os_indices:
+                machine_os_indices[mid] = []
+            machine_os_indices[mid].append(info["os_idx"])
+
         # 对关键路径上的每道工序
-        critical_os_indices = {op["os_idx"] for op in critical_ops}
+        critical_os_set = {op["os_idx"] for op in critical_ops}
 
         for op_info in critical_ops:
             os_idx = op_info["os_idx"]
             machine_id = op_info["machine_id"]
+            job_id = op_info["job_id"]
 
-            # 找同机器上的前后工序
-            same_machine = [info for info in os_info
-                            if info["machine_id"] == machine_id and info["os_idx"] != os_idx]
-
-            for other in same_machine:
-                # 尝试交换 OS 位置
-                new_os = individual["os"][:]
-                new_os[os_idx], new_os[other["os_idx"]] = new_os[other["os_idx"]], new_os[os_idx]
-
-                # 检查交换后的可行性：同一工件内不能出现乱序
-                # 即 job_id 相同的工序在 OS 中必须保持顺序
-                if not self._check_os_feasibility(new_os):
-                    continue
-
-                neighbor = {
-                    "os": new_os,
-                    "ms": individual["ms"][:],
-                    "cmax": None,
-                    "load_var": None,
-                    "fitness": None
-                }
-                new_cmax = self._evaluate_individual(neighbor)
-                neighbors.append((neighbor, ("swap", os_idx, other["os_idx"]), new_cmax))
+            # 找同机器上 OS 相邻的工序（在 OS 编码中位置相邻）
+            machine_indices = machine_os_indices.get(machine_id, [])
+            if os_idx in machine_indices:
+                pos = machine_indices.index(os_idx)
+                # 尝试与前一个工序交换
+                if pos > 0:
+                    other_idx = machine_indices[pos - 1]
+                    other_info = os_info[other_idx]
+                    # 只交换不同工件的工序
+                    if other_info["job_id"] != job_id:
+                        new_os = individual["os"][:]
+                        new_os[os_idx], new_os[other_idx] = new_os[other_idx], new_os[os_idx]
+                        if self._check_os_feasibility(new_os):
+                            neighbor = {
+                                "os": new_os,
+                                "ms": individual["ms"][:],
+                                "cmax": None, "load_var": None, "fitness": None
+                            }
+                            new_cmax = self._evaluate_individual(neighbor)
+                            neighbors.append((neighbor, ("swap", os_idx, other_idx), new_cmax))
+                # 尝试与后一个工序交换
+                if pos < len(machine_indices) - 1:
+                    other_idx = machine_indices[pos + 1]
+                    other_info = os_info[other_idx]
+                    if other_info["job_id"] != job_id:
+                        new_os = individual["os"][:]
+                        new_os[os_idx], new_os[other_idx] = new_os[other_idx], new_os[os_idx]
+                        if self._check_os_feasibility(new_os):
+                            neighbor = {
+                                "os": new_os,
+                                "ms": individual["ms"][:],
+                                "cmax": None, "load_var": None, "fitness": None
+                            }
+                            new_cmax = self._evaluate_individual(neighbor)
+                            neighbors.append((neighbor, ("swap", os_idx, other_idx), new_cmax))
 
         return neighbors
 
@@ -294,17 +323,24 @@ class TabuSearch:
 
     # ========== 主搜索过程 ==========
 
-    def optimize(self, individual, ga_instance=None):
+    def optimize(self, individual, ga_instance=None, gen=None):
         """
         对个体执行禁忌搜索
 
         参数:
             individual: 待优化的个体 (dict with os, ms)
             ga_instance: 可选的 GA 实例，用于获取 evaluate_fitness 等方法
+            gen: 当前代数（用于动态调整迭代次数）
 
         返回:
             优化后的个体
         """
+        # 动态调整迭代次数：参考 HA_FJSP，早期少迭代（探索），后期多迭代（利用）
+        if gen is not None:
+            self.current_gen = gen
+        # 从 gen=0 时约 10 次线性增长到 gen=max_gen 时约 80 次
+        effective_iterations = max(10, int(self.ts_iterations * self.current_gen / max(self.max_gen, 1)))
+
         # 深拷贝当前解
         current = {
             "os": individual["os"][:],
@@ -330,7 +366,7 @@ class TabuSearch:
 
         no_improve = 0
 
-        for iteration in range(self.ts_iterations):
+        for iteration in range(effective_iterations):
             # 找关键路径
             critical_ops = self._find_critical_path(current)
             if not critical_ops or len(critical_ops) <= 1:
@@ -390,18 +426,20 @@ class TabuSearch:
             if best_neighbor is None:
                 break
 
+            # 在更新 current 之前，记录旧机器选择（用于禁忌表）
+            old_ms_choice = None
+            if len(best_move) == 3 and isinstance(best_move[0], int):
+                job_id, op_id, new_choice = best_move
+                ms_idx = self._get_ms_index(job_id, op_id)
+                old_ms_choice = current["ms"][ms_idx] % len(self.jobs[job_id][op_id]["machines"])
+
             # 更新当前解
             current = best_neighbor
 
             # 更新禁忌表
-            if len(best_move) == 3 and isinstance(best_move[0], int):
-                # TS1: 禁忌 (job_id, op_id, old_machine_choice)
-                job_id, op_id, new_choice = best_move
-                op_data = self.jobs[job_id][op_id]
-                ms_idx = self._get_ms_index(job_id, op_id)
-                old_choice = individual["ms"][ms_idx]
-                # 禁忌旧机器选择
-                key = ("ts1", job_id, op_id, old_choice)
+            if old_ms_choice is not None:
+                # TS1: 禁忌旧机器选择（取模后的值，与邻域生成中的 alt_idx 一致）
+                key = ("ts1", job_id, op_id, old_ms_choice)
                 tabu_ts1[key] = self.tabu_tenure + random.randint(0, 5)
             elif best_move[0] == "swap":
                 key1 = ("ts2", best_move[1], best_move[2])

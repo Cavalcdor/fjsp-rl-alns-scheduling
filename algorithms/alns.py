@@ -203,7 +203,8 @@ class ALNS:
         job_op_counter = [0] * self.num_jobs
         for i, job_id in enumerate(individual["os"]):
             op_id = job_op_counter[job_id]
-            machine_choice = individual["ms"][i]
+            ms_index = self._get_ms_index(job_id, op_id)
+            machine_choice = individual["ms"][ms_index]
             op_data = self.jobs[job_id][op_id]
             
             # 边界检查
@@ -293,7 +294,8 @@ class ALNS:
         
         for i, job_id in enumerate(individual["os"]):
             op_id = job_op_counter[job_id]
-            machine_choice = individual["ms"][i]
+            ms_index = self._get_ms_index(job_id, op_id)
+            machine_choice = individual["ms"][ms_index]
             op_data = self.jobs[job_id][op_id]
             if machine_choice < len(op_data["machines"]):
                 machine_id = op_data["machines"][machine_choice]
@@ -310,7 +312,8 @@ class ALNS:
         job_op_counter = [0] * self.num_jobs
         for i, job_id in enumerate(individual["os"]):
             op_id = job_op_counter[job_id]
-            machine_choice = individual["ms"][i]
+            ms_index = self._get_ms_index(job_id, op_id)
+            machine_choice = individual["ms"][ms_index]
             op_data = self.jobs[job_id][op_id]
             if machine_choice < len(op_data["machines"]):
                 machine_id = op_data["machines"][machine_choice]
@@ -439,7 +442,9 @@ class ALNS:
         """
         new_individual = copy.deepcopy(individual)
         
-        # 直接从 OS/MS 数组计算机器当前负荷（不使用 decode，避免索引越界）
+        # 直接从 OS/MS 数组计算机器当前负荷
+        # 注意：new_individual 的 MS 是 _rebuild_ms 重建的，长度等于 OS 长度
+        # 所以用 OS 遍历顺序访问 MS 即可（MS[i] 对应 OS[i] 的机器选择）
         machine_current_load = [0] * self.num_machines
         job_op_counter = [0] * self.num_jobs
         for i, job_id in enumerate(new_individual["os"]):

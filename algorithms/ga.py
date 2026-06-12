@@ -3,6 +3,7 @@ import random
 import numpy as np
 from utils.scheduler import evaluate
 
+
 class GA:
     def __init__(self, jobs, num_machines, config):
         """
@@ -246,7 +247,8 @@ class GA:
         job_op_counter = [0] * self.num_jobs
         for i, job_id in enumerate(individual["os"]):
             op_id = job_op_counter[job_id]
-            machine_choice = individual["ms"][i]
+            ms_index = self._get_ms_index(job_id, op_id)
+            machine_choice = individual["ms"][ms_index]
             op_data = self.jobs[job_id][op_id]
             if machine_choice < len(op_data["machines"]):
                 machine_id = op_data["machines"][machine_choice]
@@ -300,7 +302,8 @@ class GA:
         job_op_counter = [0] * self.num_jobs
         for i, job_id in enumerate(individual["os"]):
             op_id = job_op_counter[job_id]
-            machine_choice = individual["ms"][i]
+            ms_index = self._get_ms_index(job_id, op_id)
+            machine_choice = individual["ms"][ms_index]
             op_data = self.jobs[job_id][op_id]
             
             num_available = len(op_data["machines"])
@@ -447,6 +450,7 @@ class GA:
         else:
             new_pop = self.initialize_population()
             best = None
+        # 只评估 fitness 为 None 的个体
         for ind in new_pop:
             if ind["fitness"] is None:
                 self.evaluate_fitness(ind)
@@ -488,6 +492,28 @@ class GA:
         # 精英保留策略：用精英个体替换新种群中最差的个体（保持种群规模不变）
         # 先将新种群按适应度排序（最差在最后）
         new_pop.sort(key=lambda ind: ind["fitness"])
+        # 从末尾开始替换最差的个体
+        replace_count = min(self.elite_count, len(new_pop))
+        for i in range(replace_count):
+            e = elites[i]
+            os_len = len(e["os"])
+            ms_len = len(e["ms"])
+            # 安全检查：确保编码长度一致
+            if os_len != ms_len or os_len == 0:
+                continue
+            # 用精英替换新种群中最差的那个
+            new_pop[-(i+1)] = {
+                "os": e["os"][:], 
+                "ms": e["ms"][:], 
+                "cmax": e["cmax"], 
+                "load_var": e["load_var"], 
+                "fitness": e["fitness"]
+            }
+        
+        self.population = new_pop
+        # 返回最优个体
+        best = min(self.population, key=lambda ind: ind["fitness"])
+        return best
         # 从末尾开始替换最差的个体
         replace_count = min(self.elite_count, len(new_pop))
         for i in range(replace_count):
@@ -556,7 +582,7 @@ class GA:
         restart_interval = 50
 
         # 阶段一改进：动态调整局部搜索概率
-        base_ls_prob = 0.3
+        base_ls_prob = 0.15
 
         for gen in range(self.max_gen):
             gen_progress = gen / max(self.max_gen, 1)
@@ -599,29 +625,10 @@ class GA:
                 no_improve_gen += 1
 
             # 阶段二改进：Tabu Search + ALNS 协同优化
-            # 每5代对精英个体执行深度局部搜索
-            if (gen + 1) % 5 == 0:
-                sorted_pop = sorted(self.population, key=lambda ind: ind["fitness"])
-                elites = sorted_pop[:self.elite_count]
-                non_elites = sorted_pop[self.elite_count:]
-
-                for i in range(len(elites)):
-                    # ALNS 优化
-                    if alns is not None:
-                        improved = alns.optimize(elites[i], self)
-                        if improved["cmax"] < elites[i]["cmax"]:
-                            elites[i] = improved
-                    # Tabu Search 深度优化（每10代执行一次，计算量较大）
-                    if tabu_search is not None and (gen + 1) % 10 == 0:
-                        ts_improved = tabu_search.optimize(elites[i])
-                        if ts_improved["cmax"] < elites[i]["cmax"]:
-                            elites[i] = ts_improved
-
-                self.population = elites + non_elites
-
-            # 阶段二改进：初始最优解也执行一次 Tabu Search
-            if tabu_search is not None and gen == 0:
-                ts_best = tabu_search.optimize(best_individual)
+            # 参考 HA_FJSP：每代对部分个体执行 TS（但控制计算量）
+            if tabu_search is not None:
+                # 每代对最优个体执行 TS（早期迭代少，后期迭代多）
+                ts_best = tabu_search.optimize(best_individual, gen=gen)
                 if ts_best["cmax"] < best_individual["cmax"]:
                     best_individual = ts_best
                     best_cmax = best_individual["cmax"]
@@ -633,6 +640,25 @@ class GA:
                         "load_var": best_individual["load_var"],
                         "fitness": best_individual["fitness"]
                     }
+
+                # 每3代对多个精英执行完整 TS
+                if (gen + 1) % 3 == 0:
+                    sorted_pop = sorted(self.population, key=lambda ind: ind["fitness"])
+                    elites = sorted_pop[:self.elite_count]
+                    non_elites = sorted_pop[self.elite_count:]
+
+                    for i in range(len(elites)):
+                        # ALNS 优化
+                        if alns is not None:
+                            improved = alns.optimize(elites[i], self)
+                            if improved["cmax"] < elites[i]["cmax"]:
+                                elites[i] = improved
+                        # Tabu Search 深度优化
+                        ts_improved = tabu_search.optimize(elites[i], gen=gen)
+                        if ts_improved["cmax"] < elites[i]["cmax"]:
+                            elites[i] = ts_improved
+
+                    self.population = elites + non_elites
 
             if rl_controller is not None:
                 new_best_cmax = min(ind["cmax"] for ind in self.population)
