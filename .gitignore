@@ -45,6 +45,9 @@ logs/
 # data/*.fjs
 # data/**/*.fjs
 
+# Reference
+reference/
+
 # OS
 .DS_Store
 Thumbs.db
