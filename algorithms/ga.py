@@ -3,6 +3,7 @@ import random
 import time
 import numpy as np
 from utils.scheduler import evaluate
+import config
 
 
 class GA:
@@ -564,13 +565,14 @@ class GA:
                     individual["ms"][i] = new_choice
         return individual
 
-    def run(self, rl_controller=None, alns=None, tabu_search=None, progress_callback=None):
+    def run(self, rl_controller=None, alns=None, tabu_search=None, progress_callback=None, bks_value=None):
         """
-        主循环
+        主循环（集成早停策略）
         rl_controller: 可选的 RL 控制器，提供 get_actions 方法
         alns: 可选的 ALNS 优化器，用于优化精英个体
         tabu_search: 可选的 TabuSearch 优化器，用于深度局部搜索
-        progress_callback: 可选的进度回调函数 fn(name, gen, max_gen, best_cmax, avg_cmax, elapsed)
+        progress_callback: 可选的进度回调函数 fn(gen, max_gen, best_cmax, avg_cmax, elapsed)
+        bks_value: 可选的 BKS 值，传入后启用 BKS 命中早停
         """
         # 初始化种群
         self.population = self.initialize_population()
@@ -688,6 +690,31 @@ class GA:
                 avg_cmax = np.mean([ind["cmax"] for ind in self.population])
                 elapsed = time.time() - _t0
                 progress_callback(gen + 1, self.max_gen, best_cmax, avg_cmax, elapsed)
+
+            # ── 早停策略判断 ──
+            if config.EARLY_STOP_ENABLED and (gen + 1) >= config.EARLY_STOP_MIN_GEN:
+                stop_reason = None
+
+                # 条件1: BKS 命中
+                if bks_value is not None and best_cmax <= bks_value:
+                    stop_reason = f"🎯 BKS 命中: Cmax={best_cmax} == BKS={bks_value}"
+
+                # 条件2: 收敛停滞
+                elif no_improve_gen >= config.EARLY_STOP_PATIENCE:
+                    stop_reason = (f"⏳ 收敛停滞: 连续 {no_improve_gen} 代无改进 "
+                                   f"(阈值 {config.EARLY_STOP_PATIENCE})")
+
+                # 条件3: 种群趋同
+                else:
+                    diversity = self._compute_diversity()
+                    if diversity < config.EARLY_STOP_DIVERSITY_THRESHOLD:
+                        stop_reason = (f"📉 种群趋同: diversity={diversity:.4f} "
+                                       f"< 阈值 {config.EARLY_STOP_DIVERSITY_THRESHOLD}")
+
+                if stop_reason is not None:
+                    if self.verbose or progress_callback:
+                        print(f"\n  [早停] Gen {gen+1}/{self.max_gen}: {stop_reason}")
+                    break
 
         # 最终：对最优个体执行一次深度 Tabu Search
         if tabu_search is not None:
