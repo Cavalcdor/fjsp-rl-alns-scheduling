@@ -13,6 +13,38 @@
 
 ---
 
+## [1.5.0] - 2026-06-13
+
+### 新增
+
+#### 1. 全量实验运行脚本 `run_experiment.py`
+- **一键运行 24 个代表性算例**：Mk(9) + Barnes(5) + Dauzère(5) + Hurink(5)，四段顺序执行
+- **分段持久化**：每批跑完立即写入磁盘，中间 crash 前面数据不丢
+- **断点续跑**：`python run_experiment.py --resume` 从上次断点继续
+- **全程容错**：一个算例挂掉不影响同批其他算例，一批挂掉不影响下一批
+
+#### 2. 分阶段可视化
+- **每批结束后自动出图**：族内对比柱状图 + 收敛曲线子图网格
+- **最终全量总览**：跨族 Cmax 对比 / 全局 Gap 散点 / 规模-耗时散点
+- **过程可视化**：24 组 Schedule Analysis + Gantt Chart（**零额外 GA 重跑**）
+
+#### 3. GA 收敛历史记录
+- `best_history` / `avg_history` 逐代记录，支持收敛曲线绘制
+
+### 优化
+
+#### 4. Schedule 内存持久化
+- 解码后的调度表 `(job, op, machine, start, end)` 存入 result dict
+- `_plot_process_visualization()` 直接取用，消除原版 24 × 100 代冗余 GA 重算
+- checkpoint/CSV 自动排除大数据字段，磁盘占用极小
+
+#### 5. 可视化套件增强
+- `plot_convergence_curves_batch()` — 分批收敛曲线子图网格
+- `plot_global_gap_scatter()` — 全局 Gap% 散点图（颜色按族区分）
+- `plot_scale_vs_runtime()` — 规模-耗时散点图（气泡大小=Cmax，含趋势线）
+
+---
+
 ## [1.4.2] - 2026-06-13
 
 ### 变更

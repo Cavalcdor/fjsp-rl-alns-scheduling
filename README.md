@@ -63,7 +63,8 @@ fjsp-rl-alns-scheduling/
 │   └── Brandimarte_Data/   # Brandimarte标准算例
 ├── output/                  # 输出结果（甘特图等）
 ├── config.py               # 全局配置
-├── main.py                 # 主程序入口
+├── main.py                 # 主程序入口（单例/批量/滚动时域）
+├── run_experiment.py       # 全量实验运行脚本（24算例分段持久化）
 └── README.md               # 项目说明
 ```
 
@@ -96,7 +97,17 @@ git commit -m "Remove tracked pycache files"
 ### 运行程序
 
 ```bash
-python main.py
+# 单算例运行
+python main.py Mk01
+
+# 批量运行指定族
+python main.py batch mk
+
+# 全量 24 个代表性算例实验（分段持久化，支持断点续跑）
+python run_experiment.py
+
+# 从上次断点继续
+python run_experiment.py --resume
 ```
 
 ### 配置参数
@@ -119,6 +130,42 @@ EPSILON_START = 0.9     # 初始探索率
 DEGRADATION_COEFF = 1.05    # 设备退化系数
 TIME_FLUCTUATION = 0.10     # 加工时间波动 ±10%
 TRIGGER_TYPE = "event_driven"  # 触发方式
+```
+
+## 🧪 全量实验（run_experiment.py）
+
+`run_experiment.py` 是专为 24 个代表性 FJSP 算例设计的全量实验运行脚本：
+
+| 批次 | 算例族 | 数量 | 数据源 |
+|------|--------|------|--------|
+| 1 | Brandimarte Mk | 9 | `data/Brandimarte_Data/Mk01~Mk09.fjs` |
+| 2 | Barnes | 5 | `data/Barnes/mt10c1~mt10xxx.fjs` |
+| 3 | Dauzère | 5 | `data/Dauzere_Data/01a~08a.fjs` |
+| 4 | Hurink | 5 | `data/Hurink_Data/{edata,rdata,vdata}/` |
+
+### 核心特性
+
+- **分段持久化**：每批结束后立即写入 checkpoint JSON + CSV
+- **断点续跑**：`--resume` 跳过已完成批次
+- **每批可视化**：族对比柱状图 + 收敛曲线子图
+- **最终总览**：跨族对比 / Gap 散点 / 规模-耗时散点 / 24 组 Gantt + 分析图
+- **零冗余计算**：schedule 内存持久化，画 Gantt 不重跑 GA
+
+### 输出位置
+
+```
+output/
+├── experiment/            # 分批 CSV + Gantt 过程图
+│   ├── batch_1_mk.csv
+│   └── gantt_process/     # 24 组分析图 + Gantt
+└── summary/               # 总览图表
+    ├── results.csv        # 主 CSV（utf-8-sig）
+    ├── checkpoint.json    # 断点文件
+    ├── family_comparison.png
+    ├── convergence_curves.png
+    ├── global_gap_scatter.png
+    ├── scale_vs_runtime.png
+    └── overview.png
 ```
 
 ## 📊 核心算法说明
@@ -227,5 +274,5 @@ MIT License
 ---
 
 **作者**: 智能制造调度研究组  
-**版本**: 1.0.0  
-**最后更新**: 2026-06-10
+**版本**: 1.5.0  
+**最后更新**: 2026-06-13

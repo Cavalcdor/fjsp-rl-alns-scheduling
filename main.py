@@ -434,6 +434,59 @@ BATCH_ALL_ORDER = [
 ]
 
 
+def _representative_24_items():
+    """
+    生成 24 个代表性算例的 batch items:
+      - Mk 全部 9 个 (Mk01~Mk09)
+      - Barnes 前 5 个 (mt10c1/cc/x/xx/xxx)
+      - Dauzère 前 5 个 (01a/02a/03a/04a/08a)
+      - Hurink 代表 5 个 (car1_edata/rdata/vdata + mt06_edata + orb1_edata)
+    """
+    items = []
+
+    # Mk 全部 9 个
+    for fname in SIMPLE_DATASETS["mk"]["files"]:
+        label = fname.replace(".fjs", "")
+        fp = os.path.join(SIMPLE_DATASETS["mk"]["path"], fname)
+        if os.path.exists(fp):
+            items.append((label, fp, SIMPLE_DATASETS["mk"]["bks"].get(fname)))
+
+    # Barnes 前 5 个
+    barnes_first5 = sorted(BARNES_BKS.keys())[:5]
+    for fname in barnes_first5:
+        label = fname.replace(".fjs", "")
+        fp = os.path.join(SIMPLE_DATASETS["barnes"]["path"], fname)
+        if os.path.exists(fp):
+            items.append((label, fp, SIMPLE_DATASETS["barnes"]["bks"].get(fname)))
+
+    # Dauzère 前 5 个
+    dauzere_first5 = sorted(DAUZERE_BKS.keys())[:5]
+    for fname in dauzere_first5:
+        label = fname.replace(".fjs", "")
+        fp = os.path.join(SIMPLE_DATASETS["dauzere"]["path"], fname)
+        if os.path.exists(fp):
+            items.append((label, fp, SIMPLE_DATASETS["dauzere"]["bks"].get(fname)))
+
+    # Hurink 代表 5 个
+    hurink_repr = [
+        ("car1", "edata"), ("car1", "rdata"), ("car1", "vdata"),
+        ("mt06", "edata"), ("orb1", "edata"),
+    ]
+    for name, subdir in hurink_repr:
+        fname = f"{name}.fjs"
+        fp = os.path.join("data/Hurink_Data", subdir, fname)
+        label = f"{name}_{subdir}"
+        bks_val = None
+        for family in HURINK_FAMILIES.values():
+            if name in family["bks_map"]:
+                bks_val = family["bks_map"][name].get(subdir)
+                break
+        if os.path.exists(fp):
+            items.append((label, fp, bks_val))
+
+    return items
+
+
 def main():
     print("=" * 60)
     print("柔性车间滚动调度系统 - 多数据集支持 v1.4.0")
@@ -504,10 +557,17 @@ def main():
     if cmd == "batch":
         if len(sys.argv) < 3:
             print("用法: python main.py batch <dataset>")
-            print("数据集: mk, barnes, dauzere, hurink_car, hurink_ft, hurink_orb, all")
+            print("数据集: mk, barnes, dauzere, hurink_car, hurink_ft, hurink_orb, representative24, all")
             return
 
         batch_target = sys.argv[2]
+
+        if batch_target == "representative24":
+            items = _representative_24_items()
+            title = "24个代表性算例（Mk9+Barnes5+Dauzère5+Hurink5）"
+            res = run_batch(items, title)
+            plot_batch_summary_all({"representative24": (title, res)})
+            return
 
         if batch_target == "all":
             total_instances = 0

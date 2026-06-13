@@ -569,6 +569,176 @@ def _friendly_name(key):
     return mapping.get(key, key)
 
 
+# ════════════════════════════════════════════════════════════
+# 新增强化可视化 (v2.0)
+# ════════════════════════════════════════════════════════════
+
+def plot_convergence_curves_batch(results, title="收敛曲线", save_dir="output/summary"):
+    """
+    将同一批内所有算例的收敛曲线画在同一张图上（子图网格）。
+    results: 每个元素包含 label, best_history, avg_history
+    """
+    import math, os
+
+    valid = [r for r in results if r.get("best_history") and len(r["best_history"]) > 1]
+    if not valid:
+        return
+
+    n = len(valid)
+    cols = min(3, n)
+    rows = math.ceil(n / cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 5.5, rows * 4))
+    if n == 1:
+        axes = np.array([axes])
+    axes_flat = axes.flatten()
+
+    for idx, r in enumerate(valid):
+        ax = axes_flat[idx]
+        best_h = r["best_history"]
+        avg_h = r["avg_history"]
+        gens = range(1, len(best_h) + 1)
+
+        ax.plot(gens, best_h, 'b-', linewidth=1.8, label='最优 Cmax')
+        ax.plot(gens, avg_h, 'r--', linewidth=1.2, alpha=0.6, label='平均 Cmax')
+        ax.fill_between(gens, best_h, avg_h, alpha=0.08, color='gray')
+
+        # 标注最终值
+        ax.axhline(y=best_h[-1], color='green', linestyle=':', linewidth=0.8)
+        ax.text(len(best_h) * 0.7, best_h[-1] + (max(best_h) - min(best_h)) * 0.02,
+                f'{best_h[-1]:.0f}', fontsize=8, color='green', fontweight='bold')
+
+        ax.set_title(f'{r["label"]}  (Cmax={r["cmax"]})', fontsize=10, fontweight='bold')
+        ax.set_xlabel('迭代次数', fontsize=8)
+        ax.set_ylabel('Cmax', fontsize=8)
+        ax.legend(fontsize=6, loc='upper right')
+        ax.grid(alpha=0.25, linestyle='--')
+        ax.tick_params(labelsize=7)
+
+    # 隐藏多余子图
+    for idx in range(n, len(axes_flat)):
+        axes_flat[idx].set_visible(False)
+
+    plt.suptitle(title, fontsize=13, fontweight='bold', y=1.01)
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, 'convergence_curves.png')
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  收敛曲线图: {save_path}")
+
+
+def plot_global_gap_scatter(results_by_family, save_dir="output/summary"):
+    """
+    全局 Gap 散点图：x=工序数, y=偏差%, 不同族用不同颜色
+    直观看出算法在不同规模算例上的表现
+    """
+    import os
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    colors = plt.cm.tab10(np.linspace(0, 1, len(results_by_family)))
+    markers = ['o', 's', 'D', '^', 'v', '<', '>', 'p', '*', 'h']
+
+    for idx, (family_key, (title, results)) in enumerate(results_by_family.items()):
+        valid = [r for r in results
+                 if r.get("total_ops", 0) > 0
+                 and r.get("gap_numeric") is not None
+                 and r.get("cmax", 0) > 0]
+        if not valid:
+            continue
+
+        xs = [r["total_ops"] for r in valid]
+        ys = [r["gap_numeric"] for r in valid]
+        labels = [r["label"] for r in valid]
+
+        marker = markers[idx % len(markers)]
+        scatter = ax.scatter(xs, ys, c=[colors[idx]], s=80, marker=marker,
+                             alpha=0.75, edgecolors='black', linewidth=0.5,
+                             zorder=3, label=title)
+
+        # 标签
+        for x, y, lab in zip(xs, ys, labels):
+            ax.annotate(lab, (x, y), textcoords="offset points",
+                        xytext=(5, 5), fontsize=6.5, alpha=0.8)
+
+    ax.axhline(y=0, color='green', linestyle='-', linewidth=1.2, alpha=0.7, label='BKS 基准线')
+    ax.axhline(y=5, color='orange', linestyle='--', linewidth=0.8, alpha=0.5)
+    ax.axhline(y=10, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
+
+    ax.set_xlabel('工序数 (Total Operations)', fontsize=12)
+    ax.set_ylabel('偏差 (Gap, %)', fontsize=12)
+    ax.set_title('全局性能散点图 — 偏差 vs 算例规模', fontsize=14, fontweight='bold')
+    ax.legend(fontsize=9, loc='upper left')
+    ax.grid(alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, 'global_gap_scatter.png')
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  全局 Gap 散点图: {save_path}")
+
+
+def plot_scale_vs_runtime(results_by_family, save_dir="output/summary"):
+    """
+    规模-耗时散点图：x=工序数, y=耗时(秒), 点大小=Cmax
+    直观看出算例复杂度与计算时间的关系
+    """
+    import os
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    colors = plt.cm.Set2(np.linspace(0, 1, len(results_by_family)))
+    markers = ['o', 's', 'D', '^', 'v', '<', '>']
+
+    for idx, (family_key, (title, results)) in enumerate(results_by_family.items()):
+        valid = [r for r in results
+                 if r.get("total_ops", 0) > 0
+                 and r.get("runtime", 0) > 0
+                 and r.get("cmax", 0) > 0]
+        if not valid:
+            continue
+
+        xs = [r["total_ops"] for r in valid]
+        ys = [r["runtime"] for r in valid]
+        sizes = [max(20, r["cmax"] / 10) for r in valid]
+        labels = [r["label"] for r in valid]
+
+        marker = markers[idx % len(markers)]
+        scatter = ax.scatter(xs, ys, s=sizes, c=[colors[idx]], marker=marker,
+                             alpha=0.7, edgecolors='black', linewidth=0.5,
+                             zorder=3, label=title)
+
+        for x, y, lab in zip(xs, ys, labels):
+            ax.annotate(lab, (x, y), textcoords="offset points",
+                        xytext=(5, 5), fontsize=6.5, alpha=0.8)
+
+    # 趋势线
+    all_x = []
+    all_y = []
+    for _, (_, results) in results_by_family.items():
+        for r in results:
+            if r.get("total_ops", 0) > 0 and r.get("runtime", 0) > 0:
+                all_x.append(r["total_ops"])
+                all_y.append(r["runtime"])
+    if len(all_x) >= 3:
+        z = np.polyfit(all_x, all_y, 1)
+        p = np.poly1d(z)
+        x_line = np.linspace(min(all_x), max(all_x), 100)
+        ax.plot(x_line, p(x_line), 'r--', linewidth=1, alpha=0.5,
+                label=f'线性趋势 (斜率={z[0]:.2f}s/单位工序)')
+
+    ax.set_xlabel('工序数 (Total Operations)', fontsize=12)
+    ax.set_ylabel('运行时间 (秒)', fontsize=12)
+    ax.set_title('算例规模 vs 运行时间 (点大小 = Cmax)', fontsize=14, fontweight='bold')
+    ax.legend(fontsize=9, loc='upper left')
+    ax.grid(alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, 'scale_vs_runtime.png')
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  规模-耗时散点图: {save_path}")
+
+
 if __name__ == "__main__":
     # 测试代码
     test_schedule = [

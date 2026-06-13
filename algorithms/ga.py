@@ -516,28 +516,6 @@ class GA:
         # 返回最优个体
         best = min(self.population, key=lambda ind: ind["fitness"])
         return best
-        # 从末尾开始替换最差的个体
-        replace_count = min(self.elite_count, len(new_pop))
-        for i in range(replace_count):
-            e = elites[i]
-            os_len = len(e["os"])
-            ms_len = len(e["ms"])
-            # 安全检查：确保编码长度一致
-            if os_len != ms_len or os_len == 0:
-                continue
-            # 用精英替换新种群中最差的那个
-            new_pop[-(i+1)] = {
-                "os": e["os"][:], 
-                "ms": e["ms"][:], 
-                "cmax": e["cmax"], 
-                "load_var": e["load_var"], 
-                "fitness": e["fitness"]
-            }
-        
-        self.population = new_pop
-        # 返回最优个体
-        best = min(self.population, key=lambda ind: ind["fitness"])
-        return best
     
     def _adaptive_mutate(self, individual, pm, gen_progress, no_improve_ratio):
         """
@@ -585,6 +563,10 @@ class GA:
         no_improve_gen = 0
         _t0 = time.time()
         restart_interval = 50
+
+        # 收敛曲线历史数据
+        best_history = []
+        avg_history = []
 
         # 阶段一改进：动态调整局部搜索概率
         base_ls_prob = 0.15
@@ -646,7 +628,7 @@ class GA:
                         "fitness": best_individual["fitness"]
                     }
 
-                # 每3代对多个精英执行完整 TS
+                # 每4代对多个精英执行完整 TS（平衡效率与优化深度）
                 if (gen + 1) % 3 == 0:
                     sorted_pop = sorted(self.population, key=lambda ind: ind["fitness"])
                     elites = sorted_pop[:self.elite_count]
@@ -691,6 +673,11 @@ class GA:
                 elapsed = time.time() - _t0
                 progress_callback(gen + 1, self.max_gen, best_cmax, avg_cmax, elapsed)
 
+            # 记录收敛历史
+            avg_cmax = np.mean([ind["cmax"] for ind in self.population])
+            best_history.append(best_cmax)
+            avg_history.append(avg_cmax)
+
             # ── 早停策略判断 ──
             # 设计原则：
             #   1) BKS 命中 → 立即停（最优）
@@ -720,11 +707,15 @@ class GA:
                         print(f"\n  [早停] Gen {gen+1}/{self.max_gen}: {stop_reason}")
                     break
 
-        # 最终：对最优个体执行一次深度 Tabu Search
+        # 最终：对最优个体执行一次深度 Tabu Search（gen=self.max_gen 确保全强度 80 次迭代）
         if tabu_search is not None:
-            final_best = tabu_search.optimize(best_individual)
+            final_best = tabu_search.optimize(best_individual, gen=self.max_gen)
             if final_best["cmax"] < best_individual["cmax"]:
                 best_individual = final_best
                 best_cmax = best_individual["cmax"]
+
+        # 将收敛历史附到返回值
+        best_individual["best_history"] = best_history
+        best_individual["avg_history"] = avg_history
 
         return best_individual
