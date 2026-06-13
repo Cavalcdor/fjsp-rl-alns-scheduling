@@ -2,13 +2,22 @@
 
 ## GA–RL–ALNS–TS 混合优化算法求解柔性作业车间调度问题
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.7%2B-blue?style=flat-square&logo=python" alt="Python"/>
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License"/>
+  <img src="https://img.shields.io/badge/GA-RL--ALNS--TS-purple?style=flat-square" alt="Algorithm"/>
+  <img src="https://img.shields.io/badge/FJSP-101%20Instances-orange?style=flat-square" alt="Benchmarks"/>
+  <img src="https://img.shields.io/badge/Status-Academic%20Research-red?style=flat-square" alt="Status"/>
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform"/>
+</p>
+
 > **摘要**：柔性作业车间调度问题（Flexible Job-Shop Scheduling Problem, FJSP）是经典作业车间调度问题的重要扩展，允许每道工序在多个可选机器上加工，在显著提升生产灵活性的同时极大增加了问题的求解复杂度。本文提出一种融合遗传算法（GA）、Q-学习强化学习（RL）、自适应大邻域搜索（ALNS）与禁忌搜索（TS）的四阶段混合优化框架，并集成滚动时域控制（RHC）机制以应对动态扰动环境。算法在 Brandimarte Mk（9 例）、Barnes（21 例）、Dauzère（8 例）以及 Hurink 三组变体（car/ft/orb × edata/rdata/vdata，共 63 例）四大标准算例家族合计 101 个基准实例上进行了系统验证，覆盖从 6×5 至 20×15 多种规模的调度场景。实验结果表明，所提混合算法在求解质量和收敛稳定性方面均表现出竞争力。此外，本文还设计了包含分段持久化、断点续跑等特性的全量实验框架，为大规模 FJSP 算法对比研究提供了可复现的实验平台。
 
 > **关键词**：柔性作业车间调度；遗传算法；Q-学习；自适应大邻域搜索；禁忌搜索；滚动时域优化；混合优化算法
 
 ---
 
-## 1 研究背景
+## 📖 1 研究背景
 
 作业车间调度问题（Job-Shop Scheduling Problem, JSP）是生产调度领域中最具代表性的组合优化问题之一，已被证明为 NP-hard 问题 [1]。柔性作业车间调度问题（Flexible Job-Shop Scheduling Problem, FJSP）作为 JSP 的泛化形式，取消了"每道工序只能在唯一专用机器上加工"的约束，允许每道工序从一组功能等效的候选机器中选择一台进行加工。这一柔性特征更贴合现代制造业中多品种、小批量、设备通用化的实际生产场景，但也使问题求解难度大幅上升——FJSP 在工序排序决策的基础上增加了机器分配决策，构成了一个兼具排序与分配双重耦合特性的复杂组合优化问题 [2]。
 
@@ -18,14 +27,14 @@
 
 本文的贡献可归纳为以下四点：
 
-1. **四阶段混合架构**：构建了 GA → RL → ALNS → TS 的递进式求解框架，各算法协同工作、优势互补。
-2. **强化学习自适应参数调控**：将 Q-学习嵌入 GA 迭代过程，基于种群收敛状态与多样性特征实时调整交叉与变异概率，实现搜索行为自主适配。
-3. **滚动时域动态调度**：支持事件驱动、周期驱动及混合驱动三种触发模式，模拟设备退化、加工时间波动、紧急插单等真实车间扰动。
-4. **系统化实验验证**：在 101 个标准基准算例上完成了全面评估，并构建了支持断点续跑的可复现实验管道。
+1. **🧬 四阶段混合架构**：构建了 GA → RL → ALNS → TS 的递进式求解框架，各算法协同工作、优势互补。
+2. **🎯 强化学习自适应参数调控**：将 Q-学习嵌入 GA 迭代过程，基于种群收敛状态与多样性特征实时调整交叉与变异概率，实现搜索行为自主适配。
+3. **🔄 滚动时域动态调度**：支持事件驱动、周期驱动及混合驱动三种触发模式，模拟设备退化、加工时间波动、紧急插单等真实车间扰动。
+4. **📊 系统化实验验证**：在 101 个标准基准算例上完成了全面评估，并构建了支持断点续跑的可复现实验管道。
 
 ---
 
-## 2 问题定义
+## 📐 2 问题定义
 
 ### 2.1 柔性作业车间调度问题
 
@@ -87,7 +96,7 @@ $$
 
 ---
 
-## 3 算法设计
+## ⚙️ 3 算法设计
 
 ### 3.1 总体框架
 
@@ -220,7 +229,7 @@ RHC 控制器支持三种触发模式：
 
 ---
 
-## 4 实验设计与结果
+## 📊 4 实验设计与结果
 
 ### 4.1 基准算例
 
@@ -295,7 +304,7 @@ Barnes 系列（21 例）涵盖了 mt10c1、mt10cc、mt10x 等变体及 setb4、
 
 ---
 
-## 5 使用指南
+## 🚀 5 使用指南
 
 ### 5.1 环境配置
 
@@ -349,7 +358,7 @@ python run_experiment.py --resume          # 断点续跑
 
 ---
 
-## 6 结论与展望
+## 📝 6 结论与展望
 
 本文提出了一种融合 GA、Q-学习 RL、ALNS 与 TS 的四阶段混合优化算法 GA–RL–ALNS–TS，并集成 RHC 机制，用于求解静态与动态场景下的 FJSP。算法在 101 个标准基准算例上完成了系统验证，覆盖了从轻量级到大规模、从低柔性到高柔性的广泛问题配置。实验结果表明，该混合框架能够有效利用各算法的互补优势，在多目标优化中取得竞争力表现。
 
@@ -362,7 +371,7 @@ python run_experiment.py --resume          # 断点续跑
 
 ---
 
-## 参考文献
+## 📚 参考文献
 
 [1] Garey M R, Johnson D S, Sethi R. The complexity of flowshop and jobshop scheduling[J]. *Mathematics of Operations Research*, 1976, 1(2): 117-129.
 
