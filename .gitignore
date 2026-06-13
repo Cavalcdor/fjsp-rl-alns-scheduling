@@ -41,9 +41,8 @@ results/
 *.log
 logs/
 
-# Data (如果需要忽略数据文件，取消下面注释)
-# data/*.fjs
-# data/**/*.fjs
+# Data（忽略数据文件，用 .gitkeep 保留目录结构）
+data/
 
 # Reference
 reference/
