@@ -692,20 +692,24 @@ class GA:
                 progress_callback(gen + 1, self.max_gen, best_cmax, avg_cmax, elapsed)
 
             # ── 早停策略判断 ──
+            # 设计原则：
+            #   1) BKS 命中 → 立即停（最优）
+            #   2) 长期无改进 → 停（已收敛）
+            #   3) 种群趋同只在已有一定停滞时检查，避免每代误停
             if config.EARLY_STOP_ENABLED and (gen + 1) >= config.EARLY_STOP_MIN_GEN:
                 stop_reason = None
 
-                # 条件1: BKS 命中
+                # 条件1: BKS 命中 → 立即停止
                 if bks_value is not None and best_cmax <= bks_value:
                     stop_reason = f"🎯 BKS 命中: Cmax={best_cmax} == BKS={bks_value}"
 
-                # 条件2: 收敛停滞
+                # 条件2: 长期收敛停滞
                 elif no_improve_gen >= config.EARLY_STOP_PATIENCE:
                     stop_reason = (f"⏳ 收敛停滞: 连续 {no_improve_gen} 代无改进 "
                                    f"(阈值 {config.EARLY_STOP_PATIENCE})")
 
-                # 条件3: 种群趋同
-                else:
+                # 条件3: 种群趋同（仅在已有一定停滞时检查）
+                elif no_improve_gen >= max(5, config.EARLY_STOP_PATIENCE // 3):
                     diversity = self._compute_diversity()
                     if diversity < config.EARLY_STOP_DIVERSITY_THRESHOLD:
                         stop_reason = (f"📉 种群趋同: diversity={diversity:.4f} "

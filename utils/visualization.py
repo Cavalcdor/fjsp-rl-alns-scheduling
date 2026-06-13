@@ -322,6 +322,253 @@ def plot_schedule_analysis(schedule: List[Tuple],
         plt.close()
 
 
+# ════════════════════════════════════════════════════════════
+# 批量运行汇总可视化 (v1.4.0)
+# ════════════════════════════════════════════════════════════
+
+def plot_batch_summary_all(results_by_family, save_dir="output/summary"):
+    """
+    批量运行结束后，生成全套汇总图表 + CSV。
+
+    results_by_family: dict，格式 {family_key: (title, [result_dict, ...])}
+        其中 result_dict 包含:
+            label, nj, nm, total_ops, cmax, bks_val, gap_str, load_var, runtime
+    save_dir: 输出目录
+    """
+    import os, csv
+    os.makedirs(save_dir, exist_ok=True)
+
+    all_flat = []       # 用于 CSV
+    family_stats = {}   # 用于 overall 对比
+
+    # 1) 逐族画对比图
+    for family_key, (title, results) in results_by_family.items():
+        if not results:
+            continue
+        plot_per_family_comparison(results, family_key, title, save_dir)
+
+        # 收集 flat 行
+        for r in results:
+            all_flat.append((family_key, title, r["label"], r["nj"], r["nm"],
+                             r["total_ops"], r["cmax"], r["bks_val"],
+                             r.get("gap_numeric", None), r["load_var"], r["runtime"]))
+
+        # 族级统计
+        bks_vals = [r["bks_val"] for r in results]
+        cmax_vals = [r["cmax"] for r in results]
+        reached = sum(1 for c, b in zip(cmax_vals, bks_vals)
+                      if b is not None and c <= b)
+        total_with_bks = sum(1 for b in bks_vals if b is not None)
+        pos_gaps = [((c - b) / b * 100) for c, b in zip(cmax_vals, bks_vals)
+                    if b is not None and b > 0 and c > b]
+        avg_gap = sum(pos_gaps) / len(pos_gaps) if pos_gaps else 0.0
+        total_runtime = sum(r["runtime"] for r in results)
+        family_stats[family_key] = {
+            "title": title,
+            "total": len(results),
+            "reached": reached,
+            "total_bks": total_with_bks,
+            "avg_gap": avg_gap,
+            "runtime": total_runtime,
+        }
+
+    # 2) 跨族总览图
+    plot_overall_comparison(family_stats, save_dir)
+
+    # 3) CSV
+    _save_results_csv(all_flat, save_dir)
+
+    print(f"\n📊 汇总图表已输出至 {save_dir}/")
+    return save_dir
+
+
+def plot_per_family_comparison(results, family_key, family_title, save_dir):
+    """
+    单族对比图：GA_Cmax 柱状图 + BKS 菱形标记 + 差距标注
+    柱色: 绿色=达BKS，红色=未达
+    """
+    import os
+    n = len(results)
+    if n == 0:
+        return
+
+    labels = [r["label"] for r in results]
+    cmax_vals = [r["cmax"] for r in results]
+    bks_vals = [r["bks_val"] for r in results]
+    runtimes = [r["runtime"] for r in results]
+
+    # 数值 gap
+    gaps = []
+    for c, b in zip(cmax_vals, bks_vals):
+        if b is not None and b > 0:
+            gaps.append((c - b) / b * 100)
+        else:
+            gaps.append(None)
+
+    reached = sum(1 for c, b in zip(cmax_vals, bks_vals)
+                  if b is not None and c <= b)
+    total_bks = sum(1 for b in bks_vals if b is not None)
+    pos_gaps = [g for g in gaps if g is not None and g > 0]
+    avg_gap = sum(pos_gaps) / len(pos_gaps) if pos_gaps else 0.0
+
+    # 自适应图宽
+    fig_w = max(10, min(n * 0.55, 28))
+    fig, ax = plt.subplots(figsize=(fig_w, 6.5))
+
+    x = range(n)
+    bar_colors = []
+    for c, b in zip(cmax_vals, bks_vals):
+        bar_colors.append('#2ca02c' if (b is not None and c <= b) else '#d62728')
+
+    bar_width = min(0.8, 12 / max(n, 1))
+    bars = ax.bar(x, cmax_vals, width=bar_width, color=bar_colors,
+                  alpha=0.85, edgecolor='black', linewidth=0.5, zorder=3)
+
+    # BKS 菱形标记
+    bks_x, bks_y = [], []
+    for i, b in enumerate(bks_vals):
+        if b is not None:
+            bks_x.append(i)
+            bks_y.append(b)
+    if bks_x:
+        ax.scatter(bks_x, bks_y, color='#1a3a5c', s=50, zorder=5,
+                   marker='D', facecolors='none', linewidths=1.8,
+                   label=f'BKS (最优已知解)')
+
+    # 差距标注
+    y_max = max(cmax_vals) if cmax_vals else 1
+    for i, (c, g) in enumerate(zip(cmax_vals, gaps)):
+        if g is not None:
+            color = '#1b5e20' if g <= 0 else '#b71c1c'
+            ax.text(i, c + y_max * 0.015, f'{g:+.1f}%',
+                    ha='center', va='bottom', fontsize=6.5,
+                    color=color, fontweight='bold', rotation=90)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=60, ha='right', fontsize=8)
+    ax.set_ylabel('Makespan (Cmax)', fontsize=11)
+    ax.set_title(
+        f'{family_title}  —  GA vs BKS 对比\n'
+        f'  BKS 达成: {reached}/{total_bks}  |  '
+        f'平均正偏差: {avg_gap:+.1f}%  |  '
+        f'总耗时: {sum(runtimes):.0f}s  |  '
+        f'共 {n} 算例',
+        fontsize=12, fontweight='bold', linespacing=1.4)
+    if bks_x:
+        ax.legend(fontsize=9, loc='upper left')
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, f'family_{family_key}.png')
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  族级对比图: {save_path}")
+
+
+def plot_overall_comparison(family_stats, save_dir):
+    """
+    跨族总览图：三面板 — BKS达标率 / 平均正偏差 / 总耗时
+    """
+    import os
+    if not family_stats:
+        return
+
+    keys = list(family_stats.keys())
+    labels = [_friendly_name(k) for k in keys]
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    # ── 面板1: BKS 达标率 ──
+    ax = axes[0]
+    rates = []
+    for k in keys:
+        s = family_stats[k]
+        rates.append(s["reached"] / max(s["total_bks"], 1) * 100)
+    colors1 = ['#2ca02c' if r >= 80 else '#ffc107' if r >= 50 else '#d62728'
+               for r in rates]
+    bars = ax.bar(range(len(keys)), rates, color=colors1, alpha=0.85,
+                  edgecolor='black', linewidth=0.5, width=0.6)
+    for bar, rate in zip(bars, rates):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                f'{rate:.0f}%', ha='center', va='bottom', fontsize=10,
+                fontweight='bold')
+    ax.set_xticks(range(len(keys)))
+    ax.set_xticklabels(labels, rotation=30, ha='right', fontsize=9)
+    ax.set_ylabel('BKS 达标率 (%)', fontsize=11)
+    ax.set_title('BKS 达标率', fontsize=13, fontweight='bold')
+    ax.set_ylim(0, 110)
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+
+    # ── 面板2: 平均正偏差 ──
+    ax = axes[1]
+    avg_gaps = [family_stats[k]["avg_gap"] for k in keys]
+    colors2 = ['#b71c1c' if g > 5 else '#ff8f00' if g > 0 else '#2ca02c'
+               for g in avg_gaps]
+    bars = ax.bar(range(len(keys)), avg_gaps, color=colors2, alpha=0.85,
+                  edgecolor='black', linewidth=0.5, width=0.6)
+    for bar, gap in zip(bars, avg_gaps):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
+                f'{gap:+.1f}%', ha='center', va='bottom', fontsize=10,
+                fontweight='bold')
+    ax.set_xticks(range(len(keys)))
+    ax.set_xticklabels(labels, rotation=30, ha='right', fontsize=9)
+    ax.set_ylabel('平均正偏差 (%)', fontsize=11)
+    ax.set_title('未达 BKS 算例的平均偏差', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+
+    # ── 面板3: 总耗时 ──
+    ax = axes[2]
+    runtimes = [family_stats[k]["runtime"] / 60 for k in keys]  # 分钟
+    colors3 = plt.cm.Blues(np.linspace(0.4, 0.9, len(keys)))
+    bars = ax.bar(range(len(keys)), runtimes, color=colors3, alpha=0.85,
+                  edgecolor='black', linewidth=0.5, width=0.6)
+    for bar, rt in zip(bars, runtimes):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
+                f'{rt:.1f}min', ha='center', va='bottom', fontsize=10,
+                fontweight='bold')
+    ax.set_xticks(range(len(keys)))
+    ax.set_xticklabels(labels, rotation=30, ha='right', fontsize=9)
+    ax.set_ylabel('总耗时 (分钟)', fontsize=11)
+    ax.set_title('各数据集运行耗时', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+
+    plt.suptitle('跨数据集汇总 — 算法性能总览', fontsize=15, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, 'overall_comparison.png')
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  跨族总览图: {save_path}")
+
+
+def _save_results_csv(all_flat, save_dir):
+    """保存全部结果为 CSV，方便贴进报告/Excel"""
+    import os, csv
+    filepath = os.path.join(save_dir, 'results.csv')
+    with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
+        w = csv.writer(f)
+        w.writerow(["数据集族", "族名", "算例", "工件", "机器", "工序",
+                     "GA_Cmax", "BKS", "偏差_%", "负荷方差", "耗时_s"])
+        w.writerows(all_flat)
+    print(f"  CSV 结果表: {filepath}")
+
+
+def _friendly_name(key):
+    """将内部 key 转为展示名"""
+    mapping = {
+        "mk": "Brandimarte Mk",
+        "barnes": "Barnes",
+        "dauzere": "Dauzère",
+        "hurink_car": "Hurink car",
+        "hurink_ft": "Hurink ft",
+        "hurink_orb": "Hurink orb",
+    }
+    return mapping.get(key, key)
+
+
 if __name__ == "__main__":
     # 测试代码
     test_schedule = [

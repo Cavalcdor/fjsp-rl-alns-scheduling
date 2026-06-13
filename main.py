@@ -38,7 +38,7 @@ import random
 
 from core.instance_parser import load_fjsp_from_file, convert_to_zero_index
 from utils.metrics import evaluate_schedule, print_metrics
-from utils.visualization import plot_schedule_analysis
+from utils.visualization import plot_schedule_analysis, plot_batch_summary_all
 from algorithms.ga import GA
 from algorithms.rl_agent import RLController
 from algorithms.alns import ALNS
@@ -339,6 +339,23 @@ def run_batch(items, title):
               f"总耗时: {time.time() - t0:.0f}s")
     print()
 
+    # 返回结构化结果（供图表使用）
+    result_dicts = []
+    for r in results:
+        bks_raw = r[5]
+        bks_val_int = bks_raw if isinstance(bks_raw, int) else None
+        gap_num = None
+        if bks_val_int is not None and bks_val_int > 0:
+            gap_num = (r[4] - bks_val_int) / bks_val_int * 100
+        result_dicts.append({
+            "label": r[0],
+            "nj": r[1], "nm": r[2], "total_ops": r[3],
+            "cmax": r[4], "bks_val": bks_val_int,
+            "gap_str": r[6], "gap_numeric": gap_num,
+            "load_var": r[7], "runtime": r[8],
+        })
+    return result_dicts
+
 
 # ============================================================
 # 数据集调度
@@ -495,6 +512,7 @@ def main():
         if batch_target == "all":
             total_instances = 0
             t_all = time.time()
+            results_by_family = {}
             for key, builder_fn, _ in BATCH_ALL_ORDER:
                 if key in SIMPLE_DATASETS:
                     title = SIMPLE_DATASETS[key]["title"]
@@ -502,7 +520,10 @@ def main():
                     title = HURINK_FAMILIES[key]["title"]
                 items = builder_fn(key)
                 total_instances += len(items)
-                run_batch(items, title)
+                res = run_batch(items, title)
+                results_by_family[key] = (title, res)
+            # 生成汇总图表
+            plot_batch_summary_all(results_by_family)
             print(f"\n{'=' * 60}")
             print(f"  全部数据集完成！共 {total_instances} 个算例，"
                   f"总耗时: {time.time() - t_all:.0f}s")
@@ -512,13 +533,15 @@ def main():
         if batch_target in SIMPLE_DATASETS:
             items = _simple_items(batch_target)
             title = SIMPLE_DATASETS[batch_target]["title"]
-            run_batch(items, title)
+            res = run_batch(items, title)
+            plot_batch_summary_all({batch_target: (title, res)})
             return
 
         if batch_target in HURINK_FAMILIES:
             items = _hurink_items(batch_target)
             title = HURINK_FAMILIES[batch_target]["title"]
-            run_batch(items, title)
+            res = run_batch(items, title)
+            plot_batch_summary_all({batch_target: (title, res)})
             return
 
         print("错误：未知数据集 '%s'。" % batch_target)

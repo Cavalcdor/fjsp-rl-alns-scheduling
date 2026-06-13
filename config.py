@@ -73,8 +73,8 @@ VERBOSE = True                     # 是否打印详细日志
 #   2) 收敛停滞: 连续 no_improve_gen >= PATIENCE 代无改进
 #   3) 种群趋同: 多样性 diversity < DIVERSITY_THRESHOLD
 EARLY_STOP_ENABLED = True                 # 总开关
-EARLY_STOP_PATIENCE = 15                  # 停滞代数上限（超过此值触发早停）
-EARLY_STOP_MIN_GEN = 10                   # 强制最小代数（防止起步阶段误停）
+EARLY_STOP_PATIENCE = 20                  # 停滞代数上限（超过此值触发早停）
+EARLY_STOP_MIN_GEN = 20                   # 强制最小代数（防止起步阶段误停）
 EARLY_STOP_DIVERSITY_THRESHOLD = 0.05     # 多样性阈值（低于此值视为趋同）
 
 # ========== 9. 辅助函数 ==========
