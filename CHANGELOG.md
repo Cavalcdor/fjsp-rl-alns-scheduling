@@ -8,10 +8,44 @@
 
 ## [Unreleased]
 
-### 新增
-- [ ] 进一步优化，突破 Mk01 Cmax=42（BKS=40）
-- [ ] 批量测试 Mk01-Mk09 所有算例
+### 待办
 - [ ] 更新 README 运行结果
+
+---
+
+## [1.4.0] - 2026-06-14
+
+### 新增
+
+#### 1. 多数据集 CLI 重构
+- **`main.py`** 完全重写为 `run` / `batch` 双命令架构
+  - `python main.py run Mk01` — 单例运行
+  - `python main.py batch mk` — 批量 Mk 系列
+  - `python main.py batch all` — 全部 101 个算例
+  - 保留所有向后兼容语法（`python main.py Mk01`、`python main.py all`）
+- **数据集定义**：`SIMPLE_DATASETS` + `HURINK_FAMILIES` 统一管理数据路径、文件列表、BKS
+
+#### 2. 多数据集 BKS 支持
+- **Brandimarte Mk**（9 个）：Mk01-Mk09，BKS 来自 OptalCP
+- **Barnes**（21 个）：mt10 / setb4 / seti5 三子族各 7 个变体
+- **Dauzère**（8 个）：01a-04a、08a、09a、14a、15a（排除 open 算例）
+- **Hurink car**（24 个）：car1-car8 × edata/rdata/vdata
+- **Hurink ft**（9 个）：mt06/mt10/mt20 × edata/rdata/vdata
+- **Hurink orb**（30 个）：orb1-orb10 × edata/rdata/vdata
+- 总计 **101 个 FJSP 算例**，覆盖 4 大经典数据集族
+
+#### 3. 滚动时域模式独立化与多数据集支持
+- `_run_rolling_horizon()` 独立函数，不再嵌入 `main()` 的条件分支
+- **多数据集支持**：`python main.py rolling_horizon barnes mt10c1` 等语法，可在任意数据集上运行滚动时域调度
+  - `rolling_horizon` + 两个参数 = `<dataset> <instance>`，底层复用 `_resolve_single_instance()`
+  - `rolling_horizon Mk02` 单参数向后兼容
+  - `rolling_horizon` 无参数 → 默认 Mk01
+- 移除对 `config.INSTANCE_PATH` / `config.DATA_ROOT` 的耦合，路径硬编码为 `data/Brandimarte_Data`
+
+### 变更
+- **向后兼容**：`python main.py Mk01`、`python main.py all`、`python main.py rolling_horizon` 全部保留
+- 移除旧版 `bks()` 函数和 `BKS_TABLE` 字典，替换为分族 BKS 常量
+- 移除 `get_instance_path()` 和旧版 `run_all_static()`，统一为 `run_single_instance()` 和 `run_batch()`
 
 ---
 
@@ -27,6 +61,11 @@
   - 📉 **种群趋同**：多样性低于阈值，种群已收敛
   - 配合 `MIN_GEN=10` 兜底，防止起步误停
 - **`main.py`**：`run_single_instance()` 和 `run_batch()` 均传入 `bks_value` 启用早停
+
+#### 2. 仓库结构规范化
+- **`.gitignore`**：`data/*.fjs` / `data/**/*.fjs` 合并为 `data/`，统一忽略整个数据目录
+- **`data/**/.gitkeep`**：4 个数据集子目录各放占位文件，确保空目录被 git 跟踪
+- 用户 clone 后自行放置数据文件，符合开源仓库标准实践
 
 ### 性能
 
