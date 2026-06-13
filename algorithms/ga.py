@@ -1,5 +1,6 @@
 # algorithms/ga.py
 import random
+import time
 import numpy as np
 from utils.scheduler import evaluate
 
@@ -563,12 +564,13 @@ class GA:
                     individual["ms"][i] = new_choice
         return individual
 
-    def run(self, rl_controller=None, alns=None, tabu_search=None):
+    def run(self, rl_controller=None, alns=None, tabu_search=None, progress_callback=None):
         """
         主循环
         rl_controller: 可选的 RL 控制器，提供 get_actions 方法
         alns: 可选的 ALNS 优化器，用于优化精英个体
         tabu_search: 可选的 TabuSearch 优化器，用于深度局部搜索
+        progress_callback: 可选的进度回调函数 fn(name, gen, max_gen, best_cmax, avg_cmax, elapsed)
         """
         # 初始化种群
         self.population = self.initialize_population()
@@ -579,6 +581,7 @@ class GA:
         best_individual = min(self.population, key=lambda ind: ind["fitness"])
         best_cmax = best_individual["cmax"]
         no_improve_gen = 0
+        _t0 = time.time()
         restart_interval = 50
 
         # 阶段一改进：动态调整局部搜索概率
@@ -680,6 +683,11 @@ class GA:
                 avg_cmax = np.mean([ind["cmax"] for ind in self.population])
                 diversity = self._compute_diversity()
                 print(f"Gen {gen+1}: best cmax={best_cmax}, avg cmax={avg_cmax:.2f}, diversity={diversity:.3f}")
+
+            if progress_callback:
+                avg_cmax = np.mean([ind["cmax"] for ind in self.population])
+                elapsed = time.time() - _t0
+                progress_callback(gen + 1, self.max_gen, best_cmax, avg_cmax, elapsed)
 
         # 最终：对最优个体执行一次深度 Tabu Search
         if tabu_search is not None:

@@ -84,8 +84,10 @@ def run_all_static():
 
     results = []
     t0 = time.time()
+    print()  # 留一行给进度条
     for i in range(1, 10):
         name = "Mk%02d.fjs" % i
+        inst_label = name.replace(".fjs", "")
         set_seed(config.RANDOM_SEED)
         p = get_instance_path(name)
         jobs_raw, nm, nj = load_fjsp_from_file(p)
@@ -95,10 +97,21 @@ def run_all_static():
         config.VERBOSE = False
 
         t_start = time.time()
+
+        def progress_callback(gen, max_gen, best_cmax, avg_cmax, elapsed):
+            bar_len = 20
+            filled = int(bar_len * gen / max_gen)
+            bar = "█" * filled + "░" * (bar_len - filled)
+            print(f"\r  [{inst_label}] {bar} {gen:3d}/{max_gen} | best={best_cmax:.0f} avg={avg_cmax:.0f} | {elapsed:.0f}s", end="", flush=True)
+
         ga = GA(jobs, nm, config)
         best = ga.run(rl_controller=RLController(config),
                       alns=ALNS(jobs, nm, config),
-                      tabu_search=TabuSearch(jobs, nm, config))
+                      tabu_search=TabuSearch(jobs, nm, config),
+                      progress_callback=progress_callback)
+
+        # 清除进度条行
+        print("\r" + " " * 80 + "\r", end="", flush=True)
 
         t_inst = time.time() - t_start
         config.VERBOSE = old_v
