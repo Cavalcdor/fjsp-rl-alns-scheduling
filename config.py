@@ -24,7 +24,7 @@ PERIODIC_INTERVAL = 100            # 周期驱动的时间间隔
 
 # ========== 3. 遗传算法参数 ==========
 POP_SIZE = 400                     # 种群规模
-MAX_GEN = 50                       # 最大迭代次数
+MAX_GEN = 100                      # 最大迭代次数
 PC_BOUND = [0.6, 0.95]            # 交叉概率动态调整边界
 PM_BOUND = [0.15, 0.40]           # 变异概率动态调整边界
 TOURNAMENT_SIZE = 4                # 锦标赛选择规模
@@ -73,9 +73,9 @@ VERBOSE = True                     # 是否打印详细日志
 #   2) 收敛停滞: 连续 no_improve_gen >= PATIENCE 代无改进
 #   3) 种群趋同: 多样性 diversity < DIVERSITY_THRESHOLD
 EARLY_STOP_ENABLED = True                 # 总开关
-EARLY_STOP_PATIENCE = 20                  # 停滞代数上限（超过此值触发早停）
-EARLY_STOP_MIN_GEN = 20                   # 强制最小代数（防止起步阶段误停）
-EARLY_STOP_DIVERSITY_THRESHOLD = 0.05     # 多样性阈值（低于此值视为趋同）
+EARLY_STOP_PATIENCE = 35                  # 停滞代数上限（超过此值触发早停）
+EARLY_STOP_MIN_GEN = 35                   # 强制最小代数（防止起步阶段误停）
+EARLY_STOP_DIVERSITY_THRESHOLD = 0.03     # 多样性阈值（低于此值视为趋同）
 
 # ========== 9. 辅助函数 ==========
 def update_instance_path(instance_name):
