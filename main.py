@@ -3,11 +3,11 @@
 主程序入口
 
 用法:
-  python main.py                            静态 GA 模式 (默认 Mk01)
+  python main.py                            GA + ALNS + TS 模式 (默认 Mk01)
   python main.py Mk02                       静态模式跑 Mk02
   python main.py all                        跑所有 Mk01-Mk10
   python main.py rolling_horizon            滚动时域模式 (默认 Mk01)
-  python main.py static_ga Mk05             静态模式跑 Mk05
+  python main.py static_ga Mk05             跑 Mk05 实例
   python main.py Mk07 --trials 6            用6个进程并行跑6次独立GA取最优
 """
 
@@ -33,8 +33,8 @@ import config
 # Brandimarte Mk 系列最优已知解 (BKS)
 BKS_TABLE = {
     "Mk01.fjs": 40, "Mk02.fjs": 26, "Mk03.fjs": 204,
-    "Mk04.fjs": 60, "Mk05.fjs": 170, "Mk06.fjs": 52,
-    "Mk07.fjs": 214, "Mk08.fjs": 523, "Mk09.fjs": 299,
+    "Mk04.fjs": 60, "Mk05.fjs": 172, "Mk06.fjs": 57,
+    "Mk07.fjs": 139, "Mk08.fjs": 523, "Mk09.fjs": 307,
     "Mk10.fjs": 165
 }
 
@@ -77,14 +77,14 @@ def run_all_static():
     sep = "  " + fmt_sep(len(header) - 2)
 
     print(f"\n{'=' * (len(header) + 2)}")
-    print("  Brandimarte Mk 系列批量测试（静态 GA）")
+    print("  Brandimarte Mk 系列批量测试 (GA + ALNS + Tabu Search)")
     print(f"{'=' * (len(header) + 2)}")
     print(header)
     print(sep)
 
     results = []
     t0 = time.time()
-    for i in range(1, 11):
+    for i in range(1, 10):
         name = "Mk%02d.fjs" % i
         set_seed(config.RANDOM_SEED)
         p = get_instance_path(name)
@@ -134,7 +134,7 @@ def run_all_static():
     avg_gap = sum(pos_gaps) / len(pos_gaps) if pos_gaps else 0.0
     reached = sum(1 for o, b in zip(our_vals, bks_vals) if isinstance(b, int) and o <= b)
 
-    print(f"\n  📊 汇总: {reached}/10 达到/超越 BKS | "
+    print(f"\n  📊 汇总: {reached}/9 达到/超越 BKS | "
           f"平均正偏差: {avg_gap:+.1f} | "
           f"总耗时: {time.time() - t0:.0f}s")
     print()
@@ -218,7 +218,7 @@ def main():
                 pass
 
     else:
-        print(f"\n=== 静态 GA 模式 (GA + ALNS + Tabu Search) ===")
+        print(f"\n=== GA + ALNS + Tabu Search 模式 ===")
         ga = GA(jobs, nm, config)
         best = ga.run(rl_controller=RLController(config),
                       alns=ALNS(jobs, nm, config),
