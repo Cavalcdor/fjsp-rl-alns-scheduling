@@ -31,11 +31,17 @@ venv.bak/
 # Output and Results
 output/
 results/
+
+# Global image ignore
 *.png
 *.jpg
 *.jpeg
 *.gif
 *.pdf
+
+# But allow tracked assets for README report images
+!assets/**/*.png
+!assets/**/*.jpg
 
 # Logs
 *.log

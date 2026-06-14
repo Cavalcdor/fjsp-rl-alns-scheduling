@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.7%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
-  <img src="https://img.shields.io/badge/Version-1.5.2-7C3AED?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-1.5.3-7C3AED?style=flat-square" alt="Version"/>
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License"/>
   <img src="https://img.shields.io/badge/Method-GA%20%C2%B7%20RL%20%C2%B7%20ALNS%20%C2%B7%20TS-8B5CF6?style=flat-square" alt="Method"/>
   <img src="https://img.shields.io/badge/Benchmark-101%20Standard%20Instances-0369A1?style=flat-square" alt="Benchmark"/>
@@ -194,25 +194,140 @@ RHC 控制器支持三种触发模式：
 | ITS | 80 | TS 最大迭代次数 |
 | Ttenure | 15 | TS 禁忌步长 |
 
-### 4.3 实验结果摘要
+### 4.3 实验结果
 
-Mk 系列（9 例）BKS 当前已知最优解（来自 OptalCP 等参考引擎）：
+本节报告 24 个代表性算例在四阶段混合算法（GA→RL→ALNS→TS）上的运行结果。实验配置为种群规模 400、最大代数 100、早停阈值 35 代。详细的 BKS 数据见 `main.py` 中的 `MK_BKS`、`BARNES_BKS`、`DAUZERE_BKS`、`HURINK_CAR_BKS`、`HURINK_FT_BKS`、`HURINK_ORB_BKS` 字典。
 
-| 算例 | 规模 | BKS |
-|:----|:----:|:---:|
-| Mk01 | 10x6 | 40 |
-| Mk02 | 10x6 | 26 |
-| Mk03 | 15x8 | 204 |
-| Mk04 | 15x8 | 60 |
-| Mk05 | 15x4 | 172 |
-| Mk06 | 10x15 | 57 |
-| Mk07 | 20x5 | 139 |
-| Mk08 | 20x10 | 523 |
-| Mk09 | 20x10 | 307 |
+#### 4.3.1 总体概览
 
-Barnes 系列（21 例）涵盖了 mt10c1、mt10cc、mt10x 等变体及 setb4、seti5 子家族，BKS 分布在 847 至 1198 之间。Dauzère 系列（8 例）BKS 分布在 2061 至 2505 之间。Hurink 系列包含 car（8x3 变体）、ft（3x3 变体）、orb（10x3 变体）三个子家族，每种变体对应 edata（柔性最低）、rdata（中等柔性）、vdata（柔性最高）三种配置，BKS 随柔性增加呈下降趋势。
+| 数据集 | 算例数 | BKS 达成 | 达成率 | 平均 Gap | 总耗时 |
+|--------|:------:|:---------:|:-----:|:---------:|:------:|
+| Brandimarte Mk | 9 | 2/9 | 22% | 9.8% | 2,091s |
+| Barnes (mt10) | 5 | 0/5 | 0% | 11.4% | 290s |
+| Dauzère | 5 | 0/5 | 0% | 12.3% | 4,731s |
+| Hurink (edata) | 5 | 1/5 | 20% | 16.0% | 246s |
+| **合计** | **24** | **3/24** | **12%** | **11.9%** | **7,358s** |
 
-完整 BKS 数据见 `main.py` 中的 `MK_BKS`、`BARNES_BKS`、`DAUZERE_BKS`、`HURINK_CAR_BKS`、`HURINK_FT_BKS`、`HURINK_ORB_BKS` 字典。
+24 个算例中 3 例命中 BKS（Mk03、Mk08、mt06_edata），平均 Gap 为 11.9%。跨数据集对比总览如下：
+
+<p align="center">
+  <img src="assets/results/overall_comparison.png" width="95%" alt="跨数据集对比总览">
+  <br><em>图 1：跨数据集对比总览（左：Cmax 绝对值；右：Gap 百分比与耗时）</em>
+</p>
+
+#### 4.3.2 Brandimarte Mk 系列（9 例）
+
+Mk 系列覆盖 10×6 至 20×10 的规模范围，Mk03 和 Mk08 成功达到 BKS。Mk06（10×15，150 道工序）Gap 最大（29.8%），反映了高机器数、高工序数场景下的求解难度。
+
+| 算例 | 规模 | 工序 | BKS | Cmax | Gap | 耗时 |
+|------|:----:|:----:|:---:|:----:|:---:|:----:|
+| Mk01 | 10×6 | 55 | 40 | 42 | +5.0% | 35s |
+| Mk02 | 10×6 | 58 | 26 | 29 | +11.5% | 122s |
+| Mk03 | 15×8 | 150 | 204 | 204 | 0% ✅ | 187s |
+| Mk04 | 15×8 | 90 | 60 | 68 | +13.3% | 201s |
+| Mk05 | 15×4 | 106 | 172 | 177 | +2.9% | 179s |
+| Mk06 | 10×15 | 150 | 57 | 74 | +29.8% | 650s |
+| Mk07 | 20×5 | 100 | 139 | 149 | +7.2% | 117s |
+| Mk08 | 20×10 | 225 | 523 | 523 | 0% ✅ | 206s |
+| Mk09 | 20×10 | 240 | 307 | 363 | +18.2% | 394s |
+
+<p align="center">
+  <img src="assets/results/family_mk.png" width="48%" alt="Mk 族级对比">
+  <img src="assets/results/convergence_mk.png" width="48%" alt="Mk 收敛曲线">
+  <br><em>图 2：Brandimarte Mk 族级对比（左）与收敛曲线（右）</em>
+</p>
+
+选取两个代表性算例的调度甘特图：Mk03（BKS 命中）与 Mk06（Gap 最大，复杂排产场景）：
+
+<p align="center">
+  <img src="assets/results/Mk03.png" width="48%" alt="Mk03 调度分析">
+  <img src="assets/results/Mk06.png" width="48%" alt="Mk06 调度分析">
+  <br><em>图 3：Mk03（左，BKS=204）与 Mk06（右，Cmax=74，BKS=57）调度分析</em>
+</p>
+
+#### 4.3.3 Barnes 系列（mt10 子家族，5 例）
+
+Barnes mt10 子家族均为 10 工件、100 道工序的中等规模算例，机器数 11–13 台。平均 Gap 为 11.4%，mt10xx 偏差最大（17.3%）。
+
+| 算例 | 规模 | 工序 | BKS | Cmax | Gap | 耗时 |
+|------|:----:|:----:|:---:|:----:|:---:|:----:|
+| mt10c1 | 10×11 | 100 | 927 | 1,010 | +9.0% | 46s |
+| mt10cc | 10×12 | 100 | 908 | 1,008 | +11.0% | 44s |
+| mt10x | 10×11 | 100 | 918 | 1,002 | +9.2% | 40s |
+| mt10xx | 10×12 | 100 | 918 | 1,077 | +17.3% | 51s |
+| mt10xxx | 10×13 | 100 | 918 | 1,017 | +10.8% | 110s |
+
+<p align="center">
+  <img src="assets/results/family_barnes.png" width="48%" alt="Barnes 族级对比">
+  <img src="assets/results/convergence_barnes.png" width="48%" alt="Barnes 收敛曲线">
+  <br><em>图 4：Barnes mt10 族级对比（左）与收敛曲线（右）</em>
+</p>
+
+#### 4.3.4 Dauzère 系列（5 例）
+
+Dauzère 算例是四组中规模最大的（196–293 道工序），08a（15×8, 293 工序）单例耗时 46 分钟。03a 取得最佳相对表现（Gap +2.4%），04a 偏差最大（+27.9%）。
+
+| 算例 | 规模 | 工序 | BKS | Cmax | Gap | 耗时 |
+|------|:----:|:----:|:---:|:----:|:---:|:----:|
+| 01a | 10×5 | 196 | 2,505 | 2,968 | +18.5% | 129s |
+| 02a | 10×5 | 196 | 2,228 | 2,322 | +4.2% | 359s |
+| 03a | 10×5 | 196 | 2,228 | 2,282 | +2.4% | 1,335s |
+| 04a | 10×5 | 196 | 2,503 | 3,201 | +27.9% | 126s |
+| 08a | 15×8 | 293 | 2,061 | 2,237 | +8.5% | 2,783s |
+
+<p align="center">
+  <img src="assets/results/family_dauzere.png" width="48%" alt="Dauzère 族级对比">
+  <img src="assets/results/convergence_dauzere.png" width="48%" alt="Dauzère 收敛曲线">
+  <br><em>图 5：Dauzère 族级对比（左）与收敛曲线（右）</em>
+</p>
+
+Dauzère 03a 的调度分析——该算例在 196 道工序、10×5 配置下取得 +2.4% 的较优表现：
+
+<p align="center">
+  <img src="assets/results/03a.png" width="70%" alt="Dauzère 03a 调度分析">
+  <br><em>图 6：Dauzère 03a 调度分析（Cmax=2,282，BKS=2,228）</em>
+</p>
+
+#### 4.3.5 Hurink 系列（edata 变体，5 例）
+
+Hurink edata 为低柔性配置，mt06_edata 命中 BKS（55）。car1_edata 与 car2_edata 为 11×5 和 13×4 的中等规模算例，Gap 约 20%–24%。
+
+| 算例 | 规模 | 工序 | BKS | Cmax | Gap | 耗时 |
+|------|:----:|:----:|:---:|:----:|:---:|:----:|
+| car1_edata | 11×5 | 55 | 6,176 | 7,627 | +23.5% | 16s |
+| car2_edata | 13×4 | 52 | 6,327 | 7,648 | +20.9% | 46s |
+| mt06_edata | 6×6 | 36 | 55 | 55 | 0% ✅ | 7s |
+| orb1_edata | 10×10 | 100 | 977 | 1,195 | +22.3% | 83s |
+| orb2_edata | 10×10 | 100 | 865 | 980 | +13.3% | 94s |
+
+<p align="center">
+  <img src="assets/results/family_hurink.png" width="48%" alt="Hurink 族级对比">
+  <img src="assets/results/convergence_hurink.png" width="48%" alt="Hurink 收敛曲线">
+  <br><em>图 7：Hurink edata 族级对比（左）与收敛曲线（右）</em>
+</p>
+
+mt06_edata 为规模最小的算例（6×6, 36 工序），算法在 35 代内命中 BKS：
+
+<p align="center">
+  <img src="assets/results/mt06_edata.png" width="70%" alt="mt06_edata 调度分析">
+  <br><em>图 8：mt06_edata 调度分析（BKS 命中，Cmax=55）</em>
+</p>
+
+#### 4.3.6 收敛性与复杂度分析
+
+全局 Gap 散点图展示了算例规模（工序数）与求解质量的关联——小规模算例（<100 工序）更易命中或接近 BKS，而大规模算例（>180 工序）Gap 分布更分散：
+
+<p align="center">
+  <img src="assets/results/global_gap_scatter.png" width="95%" alt="全局 Gap 散点图">
+  <br><em>图 9：全局 Gap 散点图（Gap vs 工序数，气泡大小为 Cmax）</em>
+</p>
+
+规模-耗时散点图揭示了计算复杂度的非线性特征——150–300 工序区间的算例耗时差异极大（Dauzère 08a 达 46 分钟），主要受工件数 × 机器数 × 工序数的三维组合影响：
+
+<p align="center">
+  <img src="assets/results/scale_vs_runtime.png" width="95%" alt="规模-耗时散点图">
+  <br><em>图 10：规模-耗时散点图（工序数 vs 耗时，气泡大小为 Cmax）</em>
+</p>
 
 ### 4.4 全量实验框架
 
