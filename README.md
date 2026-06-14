@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License"/>
   <img src="https://img.shields.io/badge/Method-GA%20%C2%B7%20RL%20%C2%B7%20ALNS%20%C2%B7%20TS-8B5CF6?style=flat-square" alt="Method"/>
   <img src="https://img.shields.io/badge/Benchmark-101%20Standard%20Instances-0369A1?style=flat-square" alt="Benchmark"/>
-  <img src="https://img.shields.io/badge/Updated-2026--06--14-64748B?style=flat-square" alt="Updated"/>
+  <img src="https://img.shields.io/badge/Updated-2026--06--15-64748B?style=flat-square" alt="Updated"/>
   <img src="https://img.shields.io/badge/Report-v2.0.0-059669?style=flat-square" alt="Report"/>
 </p>
 
