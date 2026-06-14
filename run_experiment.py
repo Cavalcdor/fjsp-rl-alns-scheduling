@@ -127,7 +127,8 @@ def save_checkpoint(all_results_by_family):
     每次调用都会覆盖，保证磁盘上的始终是最新完整数据。
     """
     # 排除大数据字段（schedule 仅运行时用，不持久化）
-    _EXCLUDE_FROM_DISK = {"schedule", "best_history", "avg_history"}
+    # best_history/avg_history 保留以便断点续跑后仍可画收敛曲线
+    _EXCLUDE_FROM_DISK = {"schedule"}
 
     def _clean(r):
         return {k: v for k, v in r.items() if k not in _EXCLUDE_FROM_DISK}
@@ -264,9 +265,11 @@ def _run_instances(items):
             ac = int(max(jt))
             lv = np.var(ml) if len(ml) > 0 else 0.0
             gap_val = (ac - bks_val) / bks_val * 100 if bks_val and bks_val > 0 else None
-            gap_s = f"{gap_val:+.1f}%" if gap_val is not None else "  N/A"
             if bks_val and ac <= bks_val:
-                gap_s = "  ✅ 0%"
+                # 精确 BKS 或超过 BKS（负偏差）→ 绿色标记
+                gap_s = f"  ✅ {gap_val:+.1f}%" if gap_val < 0 else "  ✅ 0%"
+            else:
+                gap_s = f"{gap_val:+.1f}%" if gap_val is not None else "  N/A"
 
             results.append({
                 "label": label, "nj": nj, "nm": nm, "total_ops": total_ops,
@@ -353,6 +356,21 @@ def run_final_summary(all_results_by_family, t_global):
     except Exception as e:
         print(f"  ⚠ 规模-耗时图失败: {e}")
 
+    # 收敛曲线（所有族，这样断点续跑也能重建）
+    print(f"\n  📈 生成各族的收敛曲线 ...")
+    for family_key, (title, results) in all_results_by_family.items():
+        try:
+            has_history = any(r.get("best_history") and len(r["best_history"]) > 1 for r in results)
+            if has_history:
+                plot_convergence_curves_batch(
+                    results,
+                    title=f"收敛曲线 — {title}",
+                    save_dir=SUMMARY_DIR,
+                    save_name=f"convergence_{family_key}.png",
+                )
+        except Exception as e:
+            print(f"    ⚠ {family_key} 收敛曲线失败: {e}")
+
     # 过程可视化
     print(f"\n  🎨 生成过程可视化（调度分析图）...")
     try:
@@ -366,7 +384,7 @@ def run_final_summary(all_results_by_family, t_global):
     print(f"  ✅  全流程完成！          总耗时 {final_time:.0f}s ({final_time/60:.1f}min)")
     print(f"  📁  族级对比图            {SUMMARY_DIR}/")
     print(f"  📁  跨族总览图            {SUMMARY_DIR}/overall_comparison.png")
-    print(f"  📁  收敛曲线图            {SUMMARY_DIR}/convergence_curves.png")
+    print(f"  📁  收敛曲线图(逐批)     {SUMMARY_DIR}/convergence_*.png")
     print(f"  📁  全局 Gap 散点图       {SUMMARY_DIR}/global_gap_scatter.png")
     print(f"  📁  规模-耗时散点图       {SUMMARY_DIR}/scale_vs_runtime.png")
     print(f"  📁  分批 CSV              {OUTPUT_DIR}/")
@@ -487,24 +505,25 @@ if __name__ == "__main__":
             # 关键: 每批跑完立即存盘!
             save_checkpoint(all_results_by_family)
 
-            # 📊 每批跑完立即出族级对比图
-            print(f"  📊 生成 {batch_key} 族级对比图 ...")
+            # 📊 每批跑完立即出族级对比图 + 累积跨族总览图
+            print(f"  📊 生成 {batch_key} 族级对比图 + 累积跨族总览 ...")
             try:
                 plot_batch_summary_all(
-                    {batch_key: (display_title, results)},
+                    all_results_by_family,  # 传累积数据，跨族图逐步继承各批结果
                     save_dir=SUMMARY_DIR,
                 )
-                print(f"  ✅ 族级图 → {SUMMARY_DIR}/{batch_key}_comparison.png\n")
+                print(f"  ✅ 族级图 → {SUMMARY_DIR}/  |  跨族总览已累积\n")
             except Exception as plot_e:
                 print(f"  ⚠ 族级图生成失败: {plot_e}\n")
 
-            # 📈 每批跑完立即出收敛曲线
+            # 📈 每批跑完立即出收敛曲线（按批命名，避免覆盖）
             print(f"  📈 生成 {batch_key} 收敛曲线 ...")
             try:
                 plot_convergence_curves_batch(
                     results,
                     title=f"收敛曲线 — {display_title}",
                     save_dir=SUMMARY_DIR,
+                    save_name=f"convergence_{batch_key}.png",
                 )
             except Exception as plot_e:
                 print(f"  ⚠ 收敛曲线失败: {plot_e}\n")

@@ -4,11 +4,11 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.7%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
-  <img src="https://img.shields.io/badge/Version-1.5.0-7C3AED?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-1.5.1-7C3AED?style=flat-square" alt="Version"/>
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License"/>
   <img src="https://img.shields.io/badge/Method-GA%20%C2%B7%20RL%20%C2%B7%20ALNS%20%C2%B7%20TS-8B5CF6?style=flat-square" alt="Method"/>
   <img src="https://img.shields.io/badge/Benchmark-101%20Standard%20Instances-0369A1?style=flat-square" alt="Benchmark"/>
-  <img src="https://img.shields.io/badge/Updated-2026--06--13-64748B?style=flat-square" alt="Updated"/>
+  <img src="https://img.shields.io/badge/Updated-2026--06--14-64748B?style=flat-square" alt="Updated"/>
 </p>
 
 > **摘要**：柔性作业车间调度问题（Flexible Job-Shop Scheduling Problem, FJSP）是经典作业车间调度问题的重要扩展，允许每道工序在多个可选机器上加工，在显著提升生产灵活性的同时极大增加了问题的求解复杂度。本文提出一种融合遗传算法（GA）、Q-学习强化学习（RL）、自适应大邻域搜索（ALNS）与禁忌搜索（TS）的四阶段混合优化框架，并集成滚动时域控制（RHC）机制以应对动态扰动环境。算法在 Brandimarte Mk（9 例）、Barnes（21 例）、Dauzère（8 例）以及 Hurink 三组变体（car/ft/orb × edata/rdata/vdata，共 63 例）四大标准算例家族合计 101 个基准实例上进行了系统验证，覆盖从 6×5 至 20×15 多种规模的调度场景。实验结果表明，所提混合算法在求解质量和收敛稳定性方面均表现出竞争力。此外，本文还设计了包含分段持久化、断点续跑等特性的全量实验框架，为大规模 FJSP 算法对比研究提供了可复现的实验平台。

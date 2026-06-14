@@ -341,31 +341,35 @@ def plot_batch_summary_all(results_by_family, save_dir="output/summary"):
     all_flat = []       # 用于 CSV
     family_stats = {}   # 用于 overall 对比
 
-    # 1) 逐族画对比图
+    # 1) 逐族画对比图（排除失败算例: cmax=0）
     for family_key, (title, results) in results_by_family.items():
         if not results:
             continue
-        plot_per_family_comparison(results, family_key, title, save_dir)
+        # 过滤掉运行失败的算例（cmax=0）
+        valid_results = [r for r in results if r.get("cmax", 0) > 0]
+        if not valid_results:
+            continue
+        plot_per_family_comparison(valid_results, family_key, title, save_dir)
 
-        # 收集 flat 行
-        for r in results:
+        # 收集 flat 行（只含有效算例）
+        for r in valid_results:
             all_flat.append((family_key, title, r["label"], r["nj"], r["nm"],
                              r["total_ops"], r["cmax"], r["bks_val"],
                              r.get("gap_numeric", None), r["load_var"], r["runtime"]))
 
-        # 族级统计
-        bks_vals = [r["bks_val"] for r in results]
-        cmax_vals = [r["cmax"] for r in results]
+        # 族级统计（只含有效算例）
+        bks_vals = [r["bks_val"] for r in valid_results]
+        cmax_vals = [r["cmax"] for r in valid_results]
         reached = sum(1 for c, b in zip(cmax_vals, bks_vals)
                       if b is not None and c <= b)
         total_with_bks = sum(1 for b in bks_vals if b is not None)
         pos_gaps = [((c - b) / b * 100) for c, b in zip(cmax_vals, bks_vals)
                     if b is not None and b > 0 and c > b]
         avg_gap = sum(pos_gaps) / len(pos_gaps) if pos_gaps else 0.0
-        total_runtime = sum(r["runtime"] for r in results)
+        total_runtime = sum(r["runtime"] for r in valid_results)
         family_stats[family_key] = {
             "title": title,
-            "total": len(results),
+            "total": len(valid_results),
             "reached": reached,
             "total_bks": total_with_bks,
             "avg_gap": avg_gap,
@@ -375,8 +379,8 @@ def plot_batch_summary_all(results_by_family, save_dir="output/summary"):
     # 2) 跨族总览图
     plot_overall_comparison(family_stats, save_dir)
 
-    # 3) CSV
-    _save_results_csv(all_flat, save_dir)
+    # 3) CSV（用不同文件名，避免覆盖 save_checkpoint 写的 MASTER_CSV）
+    _save_results_csv(all_flat, save_dir, filename="results_report.csv")
 
     print(f"\n📊 汇总图表已输出至 {save_dir}/")
     return save_dir
@@ -388,6 +392,8 @@ def plot_per_family_comparison(results, family_key, family_title, save_dir):
     柱色: 绿色=达BKS，红色=未达
     """
     import os
+    # 剔除失败算例
+    results = [r for r in results if r.get("cmax", 0) > 0]
     n = len(results)
     if n == 0:
         return
@@ -544,10 +550,10 @@ def plot_overall_comparison(family_stats, save_dir):
     print(f"  跨族总览图: {save_path}")
 
 
-def _save_results_csv(all_flat, save_dir):
+def _save_results_csv(all_flat, save_dir, filename="results_report.csv"):
     """保存全部结果为 CSV，方便贴进报告/Excel"""
     import os, csv
-    filepath = os.path.join(save_dir, 'results.csv')
+    filepath = os.path.join(save_dir, filename)
     with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
         w = csv.writer(f)
         w.writerow(["数据集族", "族名", "算例", "工件", "机器", "工序",
@@ -562,9 +568,7 @@ def _friendly_name(key):
         "mk": "Brandimarte Mk",
         "barnes": "Barnes",
         "dauzere": "Dauzère",
-        "hurink_car": "Hurink car",
-        "hurink_ft": "Hurink ft",
-        "hurink_orb": "Hurink orb",
+        "hurink": "Hurink",
     }
     return mapping.get(key, key)
 
@@ -573,10 +577,11 @@ def _friendly_name(key):
 # 新增强化可视化 (v2.0)
 # ════════════════════════════════════════════════════════════
 
-def plot_convergence_curves_batch(results, title="收敛曲线", save_dir="output/summary"):
+def plot_convergence_curves_batch(results, title="收敛曲线", save_dir="output/summary", save_name="convergence_curves.png"):
     """
     将同一批内所有算例的收敛曲线画在同一张图上（子图网格）。
     results: 每个元素包含 label, best_history, avg_history
+    save_name: 文件名（默认 convergence_curves.png，传按批命名的如 convergence_mk.png 避免覆盖）
     """
     import math, os
 
@@ -620,7 +625,7 @@ def plot_convergence_curves_batch(results, title="收敛曲线", save_dir="outpu
 
     plt.suptitle(title, fontsize=13, fontweight='bold', y=1.01)
     plt.tight_layout()
-    save_path = os.path.join(save_dir, 'convergence_curves.png')
+    save_path = os.path.join(save_dir, save_name)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"  收敛曲线图: {save_path}")

@@ -6,10 +6,46 @@
 
 ---
 
-## [Unreleased]
+## [1.5.1] - 2026-06-14
 
-### 待办
-- [ ] 更新 README 运行结果
+### 修复
+
+#### 1. 可视化图表覆盖 Bug 修复 (核心)
+- **问题**：`plot_batch_summary_all()` 每批只传单族数据 `{batch_key: ...}`，导致 `overall_comparison.png` 反复被覆盖，跨族总览图始终只显示当前批次
+- **修复**：改为传递累积的 `all_results_by_family`，使跨族总览图**逐步继承**已完成各批的数据
+
+#### 2. 收敛曲线文件覆盖 Bug 修复
+- **问题**：`plot_convergence_curves_batch()` 始终写入固定路径 `convergence_curves.png`，每批运行后前一批的收敛曲线被覆盖
+- **修复**：函数签名新增 `save_name` 参数，按批命名如 `convergence_mk.png`、`convergence_barnes.png`
+
+#### 3. 断点续跑收敛数据丢失 Bug 修复
+- **问题**：`save_checkpoint()` 的 `_EXCLUDE_FROM_DISK` 排除了 `best_history` / `avg_history`，导致 `--resume` 续跑后无法重建收敛曲线
+- **修复**：仅排除 `schedule`（太大不适合 JSON），保留历史收敛数据
+
+#### 4. 超 BKS 时 gap_str 错误显示
+- **问题**：当算法结果优于 BKS（负偏差）时，`gap_str` 错误显示为 `"  ✅ 0%"` 而非真实偏差值
+- **修复**：负偏差时显示真实值如 `"  ✅ -2.5%"`
+
+#### 5. CSV 文件覆盖 Bug 修复
+- **问题**：`_save_results_csv()` 写入 `results.csv` 与 `save_checkpoint()` 写入的 `MASTER_CSV` 文件名相同，导致结果被覆盖
+- **修复**：`_save_results_csv()` 输出文件名改为 `results_report.csv`
+
+#### 6. 失败算例误判为达 BKS
+- **问题**：算例运行失败时 `cmax=0`，使 `0 <= bks_val` 条件成立，被错误计入"BKS 达成"且柱状图显示绿色
+- **修复**：所有绘图函数中增加 `cmax > 0` 过滤，排除失败算例
+
+#### 7. 跨族总览图族名缺失
+- **问题**：`_friendly_name()` 缺少 `"hurink"` 映射，跨族总览图中 Hurink 显示原始 key 而非可读名称
+- **修复**：添加 `"hurink": "Hurink"` 映射
+
+#### 8. 结尾引导信息错误
+- **问题**：`run_final_summary()` 结尾打印 `convergence_curves.png`，但该文件已不再生成（改为逐批命名）
+- **修复**：改为 `convergence_*.png`
+
+### 优化
+
+#### 9. 断点续跑收敛曲线重建
+- `run_final_summary()` 新增遍历所有族的收敛曲线生成循环，确保断点续跑后所有批次的收敛图均可重建
 
 ---
 
