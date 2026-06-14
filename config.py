@@ -17,7 +17,7 @@ INSTANCE_PATH = os.path.join(DATA_ROOT, DEFAULT_INSTANCE)
 # ========== 2. 滚动时域与扰动参数 ==========
 # 设备退化系数
 # 如需禁用退化用于教学演示或原型验证，设为 1.0
-DEGRADATION_COEFF = 1.0           # 设为1.0禁用退化
+DEGRADATION_COEFF = 1.05          # 多机退化系数，设为1.05启用指数退化
 TIME_FLUCTUATION = 0.10           # 加工时间随机波动 ±10%
 TRIGGER_TYPE = "event_driven"     # 重调度触发方式：event_driven / periodic
 PERIODIC_INTERVAL = 100            # 周期驱动的时间间隔

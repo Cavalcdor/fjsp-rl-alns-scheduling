@@ -742,8 +742,6 @@ def plot_scale_vs_runtime(results_by_family, save_dir="output/summary"):
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"  规模-耗时散点图: {save_path}")
-
-
 if __name__ == "__main__":
     # 测试代码
     test_schedule = [

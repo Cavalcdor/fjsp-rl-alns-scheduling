@@ -511,6 +511,11 @@ def main():
         _run_rolling_horizon(sys.argv[2:])
         return
 
+    # ── 滚动时域批量模式 ──
+    if cmd == "batch_rh":
+        _run_rh_batch()
+        return
+
     # ── 向后兼容: python main.py Mk01 ──
     u = cmd.upper()
     if u.startswith("MK") or cmd.startswith("Mk"):
@@ -612,6 +617,188 @@ def main():
     print("用法: python main.py [run|batch|all|rolling_horizon|<instance>]")
 
 
+def _run_rh_batch():
+    """滚动时域批量模式 — Mk01~Mk09 双场景对比
+
+    场景A: 轻度退化+波动 (DEGRADATION=1.01, FLUCTUATION=±3%)
+    场景B: 无扰动基准 (DEGRADATION=1.0,  FLUCTUATION=0%)
+
+    用法:
+        python main.py batch_rh
+    """
+    import copy, json, time
+    from core.rolling_horizon import RollingHorizon
+
+    dataset_key = "mk"
+    info = SIMPLE_DATASETS[dataset_key]
+    save_dir = "output/rh_summary"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # ── 定义两个实验场景 ──
+    scenarios = [
+        {
+            "name": "无扰动基准 (Baseline)",
+            "tag": "baseline",
+            "degradation": 1.0,
+            "fluctuation": 0.0,
+        },
+        {
+            "name": "轻度退化+波动 (Mild)",
+            "tag": "mild",
+            "degradation": 1.01,
+            "fluctuation": 0.03,
+        },
+    ]
+
+    all_scenario_results = {}
+
+    for scen in scenarios:
+        tag = scen["tag"]
+        # 动态切换场景参数
+        config.DEGRADATION_COEFF = scen["degradation"]
+        config.TIME_FLUCTUATION = scen["fluctuation"]
+
+        results = []
+
+        print(f"\n{'=' * 60}")
+        print(f"  ▸ 场景: {scen['name']}")
+        print(f"    DEGRADATION_COEFF = {scen['degradation']}")
+        print(f"    TIME_FLUCTUATION  = {scen['fluctuation']}")
+        print(f"{'=' * 60}")
+
+        for idx, fname in enumerate(info["files"]):
+            set_seed(config.RANDOM_SEED + idx)
+            label = fname.replace(".fjs", "")
+            path = os.path.join(info["path"], fname)
+            bks_val = info["bks"].get(fname)
+
+            if not os.path.exists(path):
+                print(f"\n[{label}] 文件不存在，跳过")
+                continue
+
+            jobs_raw, nm, nj = load_fjsp_from_file(path)
+            jobs = convert_to_zero_index(jobs_raw)
+            total_ops = sum(len(j) for j in jobs)
+            print(f"\n{'─' * 50}")
+            print(f"  {label}: {nj}工件 × {nm}机器 × {total_ops}工序  BKS={bks_val}")
+
+            t_start = time.time()
+
+            ga_rh = GA(copy.deepcopy(jobs), nm, config)
+            rh = RollingHorizon(
+                copy.deepcopy(jobs), nm, config, ga_rh,
+                RLController(config),
+                ALNS(copy.deepcopy(jobs), nm, config),
+            )
+            rh_result = rh.run()
+            t_inst = time.time() - t_start
+
+            cmax_rh = rh_result["cmax"]
+            load_var = rh_result["load_var"]
+            _gap = gap_str(int(cmax_rh), bks_val)
+            gap_num = None
+            if bks_val is not None and bks_val > 0:
+                gap_num = (cmax_rh - bks_val) / bks_val * 100
+
+            results.append({
+                "label": label, "nj": nj, "nm": nm, "total_ops": total_ops,
+                "cmax": cmax_rh, "bks_val": bks_val,
+                "gap_str": _gap, "gap_numeric": gap_num,
+                "load_var": load_var, "runtime": t_inst,
+            })
+
+            print(f"  ✅ RHC Cmax={cmax_rh:.0f}  BKS={bks_val}  {_gap}  耗时={t_inst:.0f}s")
+
+            # 绘甘特图（加上场景标签）
+            try:
+                plot_schedule_analysis(
+                    rh_result["schedule"], nj, nm,
+                    save_path=os.path.join(save_dir, f"gantt_{label}_{tag}.png"),
+                    show=False,
+                )
+            except Exception as e:
+                print(f"  ⚠ 甘特图绘制失败: {e}")
+
+        # 场景汇总
+        if results:
+            avg_gap = sum(r["gap_numeric"] for r in results if r["gap_numeric"] is not None) / len(results)
+            total_time = sum(r["runtime"] for r in results)
+            print(f"\n  ── [{scen['name']}] 汇总 ──")
+            print(f"  平均Gap: {avg_gap:.1f}%  |  总耗时: {total_time:.0f}s")
+        else:
+            print(f"\n  [{scen['name']}] 无结果")
+
+        all_scenario_results[tag] = results
+
+    # ── 双场景对比 ──
+    print(f"\n{'=' * 70}")
+    print(f"  Mk01~Mk09 滚动时域 — 双场景对比")
+    print(f"{'=' * 70}")
+
+    baseline = all_scenario_results.get("baseline", [])
+    mild = all_scenario_results.get("mild", [])
+
+    print(f"  {'算例':<6} {'BKS':<6} {'Baseline':<10} {'Gap_B':<8} {'轻度扰动':<10} {'Gap_M':<8} {'退化损失':<9}")
+    print(f"  {'-'*6} {'-'*6} {'-'*10} {'-'*8} {'-'*10} {'-'*8} {'-'*9}")
+
+    for br in baseline:
+        label = br["label"]
+        mr = next((r for r in mild if r["label"] == label), None)
+        bks = br["bks_val"]
+        b_cmax = int(br["cmax"])
+        b_gap = br["gap_numeric"]
+        m_cmax = int(mr["cmax"]) if mr else None
+        m_gap = mr["gap_numeric"] if mr else None
+        penalty = (m_gap - b_gap) if (m_gap is not None and b_gap is not None) else None
+        print(f"  {label:<6} {bks if bks else 'N/A':<6} "
+              f"{b_cmax:<10} {f'{b_gap:.1f}%':<8} "
+              f"{m_cmax if m_cmax else '':<10} {f'{m_gap:.1f}%' if m_gap is not None else '':<8} "
+              f"{f'+{penalty:.1f}%' if penalty is not None else '':<9}")
+
+    # ── 可视化 ──
+    plot_data = {}
+    if baseline:
+        plot_data["rh_baseline"] = ("RH: 无扰动基准", baseline)
+    if mild:
+        plot_data["rh_mild"] = ("RH: 轻度退化+波动", mild)
+    if plot_data:
+        from utils.visualization import plot_batch_summary_all
+        plot_batch_summary_all(plot_data, save_dir=save_dir)
+
+    # ── 保存 CSV ──
+    import csv
+    csv_path = os.path.join(save_dir, "results_rh_comparison.csv")
+    with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
+        w = csv.writer(f)
+        w.writerow(["算例", "工件", "机器", "工序", "BKS",
+                     "Baseline_Cmax", "Baseline_Gap%",
+                     "Mild_Cmax", "Mild_Gap%", "退化损失%", "备注"])
+        for br in baseline:
+            label = br["label"]
+            mr = next((r for r in mild if r["label"] == label), None)
+            bks = br["bks_val"]
+            b_cmax = int(br["cmax"])
+            b_gap_n = br["gap_numeric"]
+            m_cmax = int(mr["cmax"]) if mr else None
+            m_gap_n = mr["gap_numeric"] if mr else None
+            penalty = (m_gap_n - b_gap_n) if (m_gap_n is not None and b_gap_n is not None) else None
+
+            note = ""
+            if m_gap_n is not None and b_gap_n is not None:
+                ratio = b_gap_n / m_gap_n if m_gap_n > 0 else 1
+                if ratio > 0.8:
+                    note = "扰动影响较小，RH鲁棒性强"
+                else:
+                    note = "扰动引入额外退化"
+
+            w.writerow([label, br["nj"], br["nm"], br["total_ops"], bks,
+                        b_cmax, f"{b_gap_n:.1f}" if b_gap_n is not None else "",
+                        m_cmax, f"{m_gap_n:.1f}" if m_gap_n is not None else "",
+                        f"{penalty:.1f}" if penalty is not None else "",
+                        note])
+    print(f"\n  CSV: {csv_path}")
+
+
 def _run_rolling_horizon(args=None):
     """滚动时域模式 — 支持多数据集
 
@@ -667,8 +854,8 @@ def _run_rolling_horizon(args=None):
     rh = RollingHorizon(jobs, nm, config, ga,
                         RLController(config),
                         ALNS(jobs, nm, config))
-    final = rh.run()
-    cmax_rh = rh.current_time
+    result = rh.run()
+    cmax_rh = result["cmax"]
 
     _bks_display = bks_val if bks_val is not None else "-"
     _gap = gap_str(int(cmax_rh), bks_val)
@@ -680,8 +867,8 @@ def _run_rolling_horizon(args=None):
     print("  %-16s %12.0f %8s %10s" % (label, cmax_rh, _bks_display, _gap))
     print("  " + "─" * 46 + "\n")
 
-    if final:
-        std = [(j, o, m, s, e) for (j, o, m, s, e) in final]
+    std = result["schedule"]
+    if std:
         metrics = evaluate_schedule(std, nj, nm)
         print_metrics(metrics, "滚动时域调度评估结果")
 

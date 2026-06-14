@@ -288,7 +288,29 @@ class RollingHorizon:
             # 注意：machine_process_count 的递增由 update_state 统一管理，此处不重复计数
         
         return executed
-    
+
+    def _collect_results(self):
+        """收集滚动时域调度的结果摘要"""
+        import numpy as np
+        nj = len(self.jobs)
+        nm = self.num_machines
+        total_ops = sum(len(job) for job in self.jobs) if self.jobs else 0
+        cmax = self.current_time
+        # 计算机器负荷方差
+        ml = [0.0] * nm
+        for (jid, oid, mid, start, end) in self.schedule:
+            if 0 <= mid < nm:
+                ml[mid] += (end - start)
+        load_var = float(np.var(ml)) if ml else 0.0
+        return {
+            "schedule": self.schedule,
+            "cmax": cmax,
+            "load_var": load_var,
+            "nj": nj,
+            "nm": nm,
+            "total_ops": total_ops,
+        }
+
     def run(self, max_time=None):
         """
         滚动时域主循环
@@ -329,4 +351,4 @@ class RollingHorizon:
         # 输出最终调度甘特图信息（简化）
         print(f"\n调度完成，总完工时间: {self.current_time}")
         print(f"总执行工序数: {len(self.schedule)}")
-        return self.schedule
+        return self._collect_results()
