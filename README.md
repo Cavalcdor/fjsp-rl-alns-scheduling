@@ -442,5 +442,5 @@ python run_experiment.py --resume          # 断点续跑
 ---
 
 <p align="center">
-  <strong>版本 1.5.0</strong> &nbsp;|&nbsp; 最后更新: 2026-06-13 &nbsp;|&nbsp; MIT License
+  <strong>版本 1.6.0</strong> &nbsp;|&nbsp; 最后更新: 2026-06-14 &nbsp;|&nbsp; MIT License
 </p>
