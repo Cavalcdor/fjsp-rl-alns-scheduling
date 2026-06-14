@@ -47,9 +47,6 @@ results/
 *.log
 logs/
 
-# Data（忽略数据文件，用 .gitkeep 保留目录结构）
-data/
-
 # Reference
 reference/
 
