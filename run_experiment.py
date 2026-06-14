@@ -50,6 +50,7 @@ import config
 
 OUTPUT_DIR = "output/experiment"
 SUMMARY_DIR = "output/summary"
+FIGURES_DIR = "output/figures"
 CHECKPOINT_PATH = os.path.join(SUMMARY_DIR, "checkpoint.json")
 MASTER_CSV = os.path.join(SUMMARY_DIR, "results.csv")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -126,9 +127,11 @@ def save_checkpoint(all_results_by_family):
     将当前所有结果写入 checkpoint JSON + 主 CSV。
     每次调用都会覆盖，保证磁盘上的始终是最新完整数据。
     """
-    # 排除大数据字段（schedule 仅运行时用，不持久化）
-    # best_history/avg_history 保留以便断点续跑后仍可画收敛曲线
-    _EXCLUDE_FROM_DISK = {"schedule"}
+    # 排除大数据字段
+    # - JSON checkpoint: 只排除 schedule（保留 best/avg_history 用于画收敛曲线）
+    # - CSV: 排除所有列表字段（CSV DictWriter 无法展开）
+    _JSON_EXCLUDE = {"schedule"}
+    _CSV_EXCLUDE = {"schedule", "avg_history", "best_history"}
 
     def _to_native(v):
         """将 numpy 类型递归转为 Python 原生类型，确保 JSON 序列化安全"""
@@ -145,15 +148,15 @@ def save_checkpoint(all_results_by_family):
             return {k: _to_native(val) for k, val in v.items()}
         return v
 
-    def _clean(r):
-        return {k: _to_native(v) for k, v in r.items() if k not in _EXCLUDE_FROM_DISK}
+    def _clean(r, exclude_set):
+        return {k: _to_native(v) for k, v in r.items() if k not in exclude_set}
 
-    # ── 序列化（bks_val 可能是 int/None → JSON 兼容） ──
+    # ── JSON checkpoint（保留完整数据，包括收敛历史） ──
     serializable = {}
     for batch_key, (title, results) in all_results_by_family.items():
         serializable[batch_key] = {
             "title": title,
-            "results": [_clean(r) for r in results],
+            "results": [_clean(r, _JSON_EXCLUDE) for r in results],
             "timestamp": timestamp(),
         }
     with open(CHECKPOINT_PATH, "w", encoding="utf-8") as f:
@@ -171,7 +174,7 @@ def save_checkpoint(all_results_by_family):
         for batch_key, (title, results) in all_results_by_family.items():
             for r in results:
                 row = {"batch": batch_key}
-                row.update(_clean(r))
+                row.update(_clean(r, _CSV_EXCLUDE))
                 writer.writerow(row)
 
     # ── 同时写一份分批 CSV（便于单独查看每批） ──
@@ -182,7 +185,7 @@ def save_checkpoint(all_results_by_family):
             writer.writeheader()
             for r in results:
                 row = {"batch": batch_key}
-                row.update(_clean(r))
+                row.update(_clean(r, _CSV_EXCLUDE))
                 writer.writerow(row)
 
     print(f"  💾 已保存 → {MASTER_CSV}  |  断点 → {CHECKPOINT_PATH}")
@@ -285,6 +288,14 @@ def _run_instances(items):
                 gap_s = f" ✅ {gap_val:+.1f}%" if gap_val < 0 else " ✅ 0%"
             else:
                 gap_s = f"{gap_val:+.1f}%" if gap_val is not None else "  N/A"
+
+            # 🎨 每个算例跑完立即出调度分析图（甘特图 + 负荷 + 完工时间）
+            try:
+                from utils.visualization import plot_schedule_analysis
+                fig_path = os.path.join(FIGURES_DIR, f"{label}.png")
+                plot_schedule_analysis(sched, nj, nm, save_path=fig_path, show=False)
+            except Exception as plot_e:
+                print(f"    ⚠ 调度图生成失败: {plot_e}")
 
             results.append({
                 "label": label, "nj": nj, "nm": nm, "total_ops": total_ops,
