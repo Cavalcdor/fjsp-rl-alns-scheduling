@@ -130,8 +130,23 @@ def save_checkpoint(all_results_by_family):
     # best_history/avg_history 保留以便断点续跑后仍可画收敛曲线
     _EXCLUDE_FROM_DISK = {"schedule"}
 
+    def _to_native(v):
+        """将 numpy 类型递归转为 Python 原生类型，确保 JSON 序列化安全"""
+        import numpy as np
+        if isinstance(v, (np.integer,)):
+            return int(v)
+        if isinstance(v, (np.floating,)):
+            return float(v)
+        if isinstance(v, np.ndarray):
+            return v.tolist()
+        if isinstance(v, list):
+            return [_to_native(x) for x in v]
+        if isinstance(v, dict):
+            return {k: _to_native(val) for k, val in v.items()}
+        return v
+
     def _clean(r):
-        return {k: v for k, v in r.items() if k not in _EXCLUDE_FROM_DISK}
+        return {k: _to_native(v) for k, v in r.items() if k not in _EXCLUDE_FROM_DISK}
 
     # ── 序列化（bks_val 可能是 int/None → JSON 兼容） ──
     serializable = {}
@@ -263,11 +278,11 @@ def _run_instances(items):
                 ml[mid] += dur
 
             ac = int(max(jt))
-            lv = np.var(ml) if len(ml) > 0 else 0.0
+            lv = float(np.var(ml)) if len(ml) > 0 else 0.0
             gap_val = (ac - bks_val) / bks_val * 100 if bks_val and bks_val > 0 else None
             if bks_val and ac <= bks_val:
                 # 精确 BKS 或超过 BKS（负偏差）→ 绿色标记
-                gap_s = f"  ✅ {gap_val:+.1f}%" if gap_val < 0 else "  ✅ 0%"
+                gap_s = f" ✅ {gap_val:+.1f}%" if gap_val < 0 else " ✅ 0%"
             else:
                 gap_s = f"{gap_val:+.1f}%" if gap_val is not None else "  N/A"
 
@@ -430,33 +445,6 @@ def _plot_process_visualization(all_results_by_family):
             print(f"        ⚠ 绘图失败: {e}")
 
     print(f"  ✅ 过程可视化完成！共 {len(all_flat)} 张图 → {proc_dir}")
-
-
-def _find_filepath(family_key, label):
-    """根据家族 key 和标签找到文件路径"""
-    import glob
-    for ds_key, info in SIMPLE_DATASETS.items():
-        fname_candidates = [label + ".fjs", label]
-        for fn in fname_candidates:
-            fp = os.path.join(info["path"], fn)
-            if os.path.exists(fp):
-                return fp
-    hurink_subdirs = ["edata", "rdata", "vdata"]
-    for base in ["car", "mt06", "mt10", "mt20", "orb"]:
-        if label.startswith(base):
-            suffix = label[len(base) + 1:] if "_" in label else ""
-            if suffix in hurink_subdirs:
-                fname = f"{base}.fjs"
-                fp = os.path.join("data/Hurink_Data", suffix, fname)
-                if os.path.exists(fp):
-                    return fp
-    matches = list(glob.glob(f"data/**/{label}.fjs", recursive=True))
-    if matches:
-        return matches[0]
-    matches = list(glob.glob(f"data/**/{label}", recursive=True))
-    if matches:
-        return matches[0]
-    return None
 
 
 # ════════════════════════════════════════════════════════════

@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.7%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
-  <img src="https://img.shields.io/badge/Version-1.5.1-7C3AED?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-1.5.2-7C3AED?style=flat-square" alt="Version"/>
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License"/>
   <img src="https://img.shields.io/badge/Method-GA%20%C2%B7%20RL%20%C2%B7%20ALNS%20%C2%B7%20TS-8B5CF6?style=flat-square" alt="Method"/>
   <img src="https://img.shields.io/badge/Benchmark-101%20Standard%20Instances-0369A1?style=flat-square" alt="Benchmark"/>

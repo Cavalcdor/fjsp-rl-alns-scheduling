@@ -6,6 +6,19 @@
 
 ---
 
+## [1.5.2] - 2026-06-14
+
+### 修复
+
+#### 1. numpy JSON 序列化兼容性
+- **问题**：`ga.run()` 中 `avg_history` 存储 `numpy.float64`，`save_checkpoint()` 用 `json.dump(..., default=str)` 序列化为字符串 `"87.5"` 而非浮点数 `87.5`
+- **修复**：`save_checkpoint()` 新增 `_to_native()` 递归清洗函数，将 `np.integer`、`np.floating`、`np.ndarray` 全部转为 Python 原生类型；`_clean()` 中不再直接过滤 schedule，而是递归转换全部字段
+
+#### 2. 死代码清理
+- **删除**：`_find_filepath()` 函数（定义后从未被调用）
+
+---
+
 ## [1.5.1] - 2026-06-14
 
 ### 修复
